@@ -1,0 +1,9 @@
+[submodule "landing-page"]
+	path = landing-page
+	url = .\\landing-page\\
+[submodule "backend"]
+	path = backend
+	url = .\\backend\\
+[submodule "frontend"]
+	path = frontend
+	url = .\\frontend\\
