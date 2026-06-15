@@ -54,3 +54,7 @@ Use trace sampling in production. Start with a low sample ratio for normal traff
 Do not export full prompts, completions, attachment text, RAG chunks, long-term memory content, JWTs, Authorization headers, presigned URL signatures, object keys, or host filesystem paths. SmartClass exporters use the existing sanitization layer and keep Prometheus labels low-cardinality.
 
 Route OpenTelemetry through a Collector rather than hard-coding a backend in application code. The Collector can forward traces to Tempo, Jaeger, Grafana Cloud, Datadog, Honeycomb, or another deployment-selected backend.
+
+## Docker Deployment
+
+For a Compose-based stack with backend, frontend, PostgreSQL/pgvector, MinIO, OnlyOffice, OpenTelemetry Collector, Prometheus, and Grafana, see [Docker Deployment](../deployment/docker.md). The Docker Prometheus config scrapes `backend:8000` inside the Compose network, while the standalone example in this directory keeps `host.docker.internal:8000` for host-run backend development.

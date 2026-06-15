@@ -8,6 +8,7 @@
 
 # Environment variables
 .env
+.env.docker
 
 # Build
 build/
