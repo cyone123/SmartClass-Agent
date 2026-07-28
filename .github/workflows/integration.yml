@@ -1,0 +1,20 @@
+name: Integration
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  compose-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Validate compose config
+        run: |
+          cp .env.docker.example .env.docker
+          docker compose config -q
+      - name: Build backend image
+        run: docker compose build backend
