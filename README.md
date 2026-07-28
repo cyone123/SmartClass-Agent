@@ -10,6 +10,11 @@
 [![Vue](https://img.shields.io/badge/Vue-3.5+-42b883.svg)](https://vuejs.org/)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
+[![CI](https://github.com/cyone123/SmartClass-Agent/actions/workflows/integration.yml/badge.svg)](https://github.com/cyone123/SmartClass-Agent/actions/workflows/integration.yml)
+[![Backend CI](https://github.com/cyone123/SmartClass-Agent-Backend/actions/workflows/ci.yml/badge.svg)](https://github.com/cyone123/SmartClass-Agent-Backend/actions/workflows/ci.yml)
+[![Backend Eval](https://github.com/cyone123/SmartClass-Agent-Backend/actions/workflows/eval.yml/badge.svg)](https://github.com/cyone123/SmartClass-Agent-Backend/actions/workflows/eval.yml)
+[![Frontend CI](https://github.com/cyone123/SmartClass-Agent-Frontend/actions/workflows/ci.yml/badge.svg)](https://github.com/cyone123/SmartClass-Agent-Frontend/actions/workflows/ci.yml)
+
 *基于 LangGraph 的多模态教学智能体，帮助教师快速完成备课、教学设计、课件生成与互动内容创作*
 
 [功能特性](#功能特性) • [快速开始](#快速开始) • [架构设计](#架构设计) • [文档](#文档) • [贡献指南](#贡献指南)
