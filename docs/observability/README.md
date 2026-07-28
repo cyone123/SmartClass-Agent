@@ -42,6 +42,7 @@ Recommended dashboard panels:
 - RAG retrieval count and latency
 - artifact generation/revision success and failure counts
 - file ingestion success and failure counts
+- context compression checked/skipped/completed/failed counts
 - workspace code execution failures
 - storage operation failures
 
@@ -54,6 +55,8 @@ Use trace sampling in production. Start with a low sample ratio for normal traff
 Do not export full prompts, completions, attachment text, RAG chunks, long-term memory content, JWTs, Authorization headers, presigned URL signatures, object keys, or host filesystem paths. SmartClass exporters use the existing sanitization layer and keep Prometheus labels low-cardinality.
 
 Route OpenTelemetry through a Collector rather than hard-coding a backend in application code. The Collector can forward traces to Tempo, Jaeger, Grafana Cloud, Datadog, Honeycomb, or another deployment-selected backend.
+
+Context compression emits `context.compression.checked`, `context.compression.skipped`, `context.compression.started`, `context.compression.completed`, and `context.compression.failed`. These observations should contain only bounded size/count/duration fields and skip reasons; the compressed summary itself is not exported. Configuration and rollout details live in [Context Compression](../context-compression.md).
 
 ## Docker Deployment
 
