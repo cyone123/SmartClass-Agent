@@ -7,7 +7,7 @@
 
 ## 1. 核心判断
 
-先说结论：**这个项目缺的不是测量基础设施，而是"跑出数字并沉淀下来"这最后一步。**
+先说结论：**项目已有测量基础，但必须先通过阶段 0 的契约、统计、脱敏和 CI 门禁，才能安全地跑真实模型实验并把数字写进简历。**
 
 现状盘点（都是已存在的事实）：
 
@@ -21,7 +21,7 @@
 | ~20 个后端功能测试文件 | `backend/tests/` | 测试数量、覆盖率 |
 | Docker Compose 全栈（backend/frontend/PG/MinIO/OnlyOffice/Prometheus/Grafana） | `docs/deployment/docker.md` | 一键部署、服务数量 |
 
-所以补数字的路线是：**用现有设施设计一批"可复现实验"，把结果沉淀成报告文件（进仓库），简历引用报告里的数字。** 面试官追问时，你能打开仓库指着 JSON/dashboard 说"这是怎么测的"——这本身就是工程结果证明。
+所以补数字的路线是：**先修复测量系统，再用它设计可复现实验，把脱敏后的聚合证据沉淀进仓库，简历只引用通过门禁的数字。** 面试官追问时，可以打开 manifest、summary、报告和 dashboard 说明测量方法——这本身就是工程结果证明。
 
 另一个前提要诚实面对：这是个人项目，没有真实生产流量。所以数字的正确来源是 **benchmark、评估集、压测、消融实验（A/B before-after）**，而不是编造"服务了 X 万用户"。这类数字在面试中反而更有说服力，因为它证明你有"测量与评估"的工程习惯——这正是 Agent 工程岗位最看重的能力。
 
@@ -85,9 +85,10 @@
 
 ### 2.6 可观测性与评估闭环
 
-这条目前只有"24 个评估用例"一个数字，且没有结果。要补的是**结果和闭环证明**：
+这条目前只有"24 个评估用例"一个数字，且真实模型基线尚未运行。要补的是**结果和闭环证明**：
 
-- 跑通 `evals/cli.py` 全量 suite，把 `EvalReport`（passed/failed/avg_score/category_scores）JSON 存入 `backend/tests/evals/results/` 并提交仓库
+- 先通过阶段 0 的 24/24 严格校验、评估基础设施测试和 fail-closed 回归 smoke，再运行真实模型 suite
+- 原始 `EvalReport` 留在被 Git 忽略的 `backend/tests/evals/results/`；只将通过回归门禁的聚合数据晋升到 `docs/benchmarks/baselines/`
 - 用 `check_regression.py` 建立基线对比：至少演示一次"改动导致某用例回退→被回归检查抓住"的真实案例，这是面试讲闭环最好的故事
 - 指标覆盖数量：数一下实际导出的 metrics/observation 种类（LLM、tool、RAG、artifact、ingestion、compression、storage、workspace 至少 8 类），配一张 Grafana dashboard 截图存 `docs/observability/`
 
@@ -113,11 +114,12 @@
 
 ### 3.2 CI 门禁（工程结果的硬证明）
 
-企业级评估报告（`docs/enterprise-readiness-assessment.md`）已指出缺 CI。这是投入产出比最高的工程补强：
+企业级评估报告（`docs/enterprise-readiness-assessment.md`）指出 CI 覆盖不足。这里应当**扩展现有 `integration.yml`**，而不是新建一套相互重复的 CI：
 
-- GitHub Actions：lint + 后端 pytest + 评估 suite 冒烟子集 + 前端 build
+- 扩展 GitHub Actions：lint + 后端 pytest + 24/24 评估静态校验与 harness 测试 + 前端 build，并保留 Compose smoke
 - 把 `check_regression.py` 挂进 CI 作为评估回归门禁
-- README 挂 CI badge + 测试数量/覆盖率
+- CI 仅上传测试摘要和脱敏 smoke 证据，不上传原始模型输入输出
+- 真实模型评估保留为后续独立 `workflow_dispatch`，普通 push 不读取模型 API Key
 
 **产出数字示例：** "CI 集成 XX 个后端测试与评估回归门禁，主干构建通过率 100%"。GitHub 仓库首页的绿色 badge 是面试官 10 秒内就能看到的工程信号。
 
@@ -127,7 +129,7 @@
 
 ### 沉淀（让数字可验证）
 
-- 所有实验结果存 `docs/benchmarks/`：每个实验一个 markdown（实验设计、环境、命令、原始数据链接、结论），评估 JSON 报告进 `backend/tests/evals/results/`
+- 所有可提交实验结果存 `docs/benchmarks/`：每个实验包含 manifest、脱敏 summary 和 markdown 报告；原始评估 JSON 只在本地或受控存储留存，不提交仓库
 - Grafana 截图、压测报告图表一并入库
 - 简历上每个数字都应该能在仓库里找到出处——面试时直接打开给面试官看
 
@@ -149,8 +151,12 @@
 
 按投入产出比排序：
 
-**第一批（1~2 天，纯收割已有设施）**
-1. 跑通全量 eval suite，沉淀第一份 `EvalReport` JSON → 立刻获得 4 个维度的通过率数字
+**阶段 0（先修测量系统）**
+1. 通过 24/24 用例严格校验、断言/evaluator 单测、Schema 2.0 报告统计和 fail-closed 回归 fixtures
+2. 晋升一份不含用户内容的 `stage0-smoke`，并让现有 CI 覆盖后端、评估、前端和 Compose 门禁
+
+**第一批（阶段 0 通过后，1~2 天）**
+1. 跑真实模型全量 eval suite，晋升第一份脱敏 `model-eval` 基线 → 获得各分类通过率数字
 2. 长对话压缩实验（开/关对比）→ token 削减率 + 延迟数字
 3. 批量产物生成 60 次 → 成功率 + 耗时数字
 

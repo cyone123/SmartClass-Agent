@@ -1,0 +1,16 @@
+baseline_id: stage0-smoke
+schema_version: '1.0'
+source_report_name: passing.json
+run_mode: smoke
+git_commit: fixture
+dataset_fingerprint: sha256:fixture
+commands: []
+sample_size: 6
+metric_definitions:
+  pass_rate: passed / total_cases
+  error_rate: error / total_cases
+  avg_score: arithmetic mean of per-case scores
+limitations:
+- This evidence contains aggregate metrics only.
+- Deterministic or smoke results do not represent live-model latency or quality.
+replaced_existing_baseline: false
