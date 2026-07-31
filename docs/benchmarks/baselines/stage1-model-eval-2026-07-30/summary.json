@@ -1,0 +1,103 @@
+{
+  "schema_version": "2.0",
+  "suite_id": "eval_1785428042",
+  "run_mode": "mixed",
+  "total_cases": 24,
+  "passed": 23,
+  "failed": 1,
+  "error": 0,
+  "pass_rate": 0.9583333333333334,
+  "error_rate": 0.0,
+  "avg_score": 0.9420797413793104,
+  "category_metrics": {
+    "context_compression": {
+      "run_mode": "deterministic",
+      "count": 4,
+      "passed": 4,
+      "failed": 0,
+      "error": 0,
+      "pass_rate": 1.0,
+      "error_rate": 0.0,
+      "avg_score": 1.0
+    },
+    "extraction_quality": {
+      "run_mode": "model-eval",
+      "count": 7,
+      "passed": 6,
+      "failed": 1,
+      "error": 0,
+      "pass_rate": 0.8571428571428571,
+      "error_rate": 0.0,
+      "avg_score": 0.8014162561576355
+    },
+    "intent_recognition": {
+      "run_mode": "model-eval",
+      "count": 5,
+      "passed": 5,
+      "failed": 0,
+      "error": 0,
+      "pass_rate": 1.0,
+      "error_rate": 0.0,
+      "avg_score": 1.0
+    },
+    "memory_retrieval": {
+      "run_mode": "model-eval",
+      "count": 3,
+      "passed": 3,
+      "failed": 0,
+      "error": 0,
+      "pass_rate": 1.0,
+      "error_rate": 0.0,
+      "avg_score": 1.0
+    },
+    "memory_update": {
+      "run_mode": "model-eval",
+      "count": 1,
+      "passed": 1,
+      "failed": 0,
+      "error": 0,
+      "pass_rate": 1.0,
+      "error_rate": 0.0,
+      "avg_score": 1.0
+    },
+    "memory_write": {
+      "run_mode": "model-eval",
+      "count": 4,
+      "passed": 4,
+      "failed": 0,
+      "error": 0,
+      "pass_rate": 1.0,
+      "error_rate": 0.0,
+      "avg_score": 1.0
+    }
+  },
+  "dataset_fingerprint": "sha256:fc363adfca72397f2af3bdd4350d2e0ac6ed524f140154deb674a902a9487a53",
+  "git_commit": "961f007c9d2b976b7c7f3e6b1df1e27ceab6dda8",
+  "repository_dirty": true,
+  "source_fingerprint": "sha256:f34d4e7a3830f427307691c89bcbbde9a85d6ab787f2855f3be45dc1533ae235",
+  "model": {
+    "provider": "dashscope",
+    "model": "qwen3.7-max-2026-06-08",
+    "models": {
+      "main": "qwen3.7-max-2026-06-08",
+      "structured": "qwen3.7-flash-2026-07-15",
+      "fast": "qwen3.7-flash-2026-07-15",
+      "small": "qwen3.7-flash-2026-07-15",
+      "memory": "qwen3.7-flash-2026-07-15"
+    }
+  },
+  "environment": {
+    "os": "Windows-11-10.0.26100-SP0",
+    "python": "3.13.0",
+    "architecture": "AMD64",
+    "config": {
+      "WORKSPACE_EXECUTION_BACKEND": "local",
+      "OBSERVABILITY_ENABLED": "false",
+      "PROMETHEUS_ENABLED": "false",
+      "OTEL_ENABLED": "true",
+      "STRUCTURED_WARMUP_ENABLED": "False"
+    }
+  },
+  "execution_time": 575.7549780999543,
+  "timestamp": "2026-07-30T16:14:02.057030+00:00"
+}

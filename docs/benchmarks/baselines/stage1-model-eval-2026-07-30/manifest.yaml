@@ -1,0 +1,20 @@
+baseline_id: stage1-model-eval-2026-07-30
+schema_version: '1.0'
+source_report_name: eval_1785428042.json
+run_mode: mixed
+git_commit: 961f007c9d2b976b7c7f3e6b1df1e27ceab6dda8
+repository_dirty: true
+source_fingerprint: sha256:f34d4e7a3830f427307691c89bcbbde9a85d6ab787f2855f3be45dc1533ae235
+dataset_fingerprint: sha256:fc363adfca72397f2af3bdd4350d2e0ac6ed524f140154deb674a902a9487a53
+commands:
+- python -m tests.evals.cli run --local-docker-db
+sample_size: 24
+metric_definitions:
+  pass_rate: passed / total_cases
+  error_rate: error / total_cases
+  avg_score: arithmetic mean of per-case scores
+limitations:
+- This evidence contains aggregate metrics only.
+- Deterministic or smoke results do not represent live-model latency or quality.
+- Category run modes must be used to distinguish deterministic and model-backed evidence.
+replaced_existing_baseline: false
