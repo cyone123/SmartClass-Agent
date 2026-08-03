@@ -35,6 +35,48 @@ python -m tests.evals.cli promote-baseline `
 普通 `run` 只生成本地原始报告。只有显式执行 `promote-baseline`，且报告通过回归门禁后，
 才会生成可提交证据。Baseline ID 默认不可覆盖；确需替换时必须显式传入 `--replace`。
 
+上下文压缩 A/B 使用独立的生产入口 benchmark：
+
+```powershell
+python -m tests.benchmarks.context_compression_ab `
+  --turns 30 50 100 `
+  --repeats 3 `
+  --trigger-tokens 6000 `
+  --keep-recent-turns 6 `
+  --promote-baseline context-compression-ab-YYYY-MM-DD
+```
+
+该脚本使用固定合成长对话，A 组关闭压缩，B 组调用真实压缩模型；晋升时只写入聚合结果，
+原始逐次报告仍保存在 `backend/tests/evals/results/`。
+
+产物生成实验使用 5 个固定跨学科合成场景，每个场景重复 2 次，并在真实生产链路中并行生成
+PPTX、DOCX 与单文件 HTML，共 30 个正式样本：
+
+```powershell
+python -m tests.benchmarks.artifact_generation `
+  --phase formal `
+  --local-docker-services `
+  --model-env ../.env `
+  --model-profile structured `
+  --timeout-seconds 600 `
+  --promote-baseline artifact-generation-YYYY-MM-DD
+```
+
+使用 DeepSeek V4 混合思考模型执行工具型 Agent 时，应显式关闭 thinking，避免工具调用后因
+`reasoning_content` 未回传而被兼容接口拒绝：
+
+```powershell
+$env:MODEL_THINKING_MODE = "disabled"
+```
+
+该设置会写入实验报告的模型元数据；不得在报告中省略或把 thinking-disabled 与 thinking-enabled
+结果合并统计。
+
+运行正式实验前应先执行 `smoke`（3 个样本）和 `pilot`（6 个样本）。只有 pilot 的证据门禁
+与产品阈值都通过、模型额度足以完成全部正式样本时，才运行 `formal` 并晋升 baseline。
+当前不依赖 OnlyOffice：PPTX/DOCX 使用 ZIP、XML、OOXML schema 和解析器校验，HTML 使用
+JavaScript 语法及交互结构校验；报告必须明确这不包含 Office 视觉渲染、溢出检查或人工教学审阅。
+
 ## 必填实验信息
 
 每份正式 baseline 必须能回答：

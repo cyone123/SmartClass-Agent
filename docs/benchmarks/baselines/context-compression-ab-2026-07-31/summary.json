@@ -1,0 +1,147 @@
+{
+  "schema_version": "1.0",
+  "benchmark": "context-compression-ab",
+  "run_mode": "live-model-ab",
+  "duration_seconds": 384.74,
+  "sample_definition": {
+    "turn_checkpoints": [
+      30,
+      50,
+      100
+    ],
+    "treatment_repeats": 3,
+    "synthetic_conversation": true,
+    "main_agent_responses": "deterministic fixtures"
+  },
+  "settings": {
+    "enabled": true,
+    "trigger_tokens": 6000,
+    "keep_recent_turns": 6,
+    "max_output_tokens": 800,
+    "max_preface_chars": 6000
+  },
+  "model": {
+    "name": "qwen3.7-flash-2026-07-15",
+    "provider": "dashscope"
+  },
+  "token_measurement": {
+    "main_prompt": "production estimate_message_tokens fallback (characters / 4)",
+    "compression_overhead": "same estimator for prompt and compressed-message size",
+    "provider_usage_recorded_locally": true
+  },
+  "scenarios": [
+    {
+      "turns": 30,
+      "repeats": 3,
+      "control": {
+        "cumulative_prompt_tokens": 124518,
+        "final_context_tokens": 8413,
+        "final_message_count": 60
+      },
+      "treatment": {
+        "cumulative_prompt_tokens_mean": 92356.67,
+        "final_context_tokens_mean": 4393.0,
+        "final_message_count_mean": 29.0,
+        "compression_attempts_total": 3,
+        "compression_calls_total": 3,
+        "compression_calls_mean": 1.0,
+        "compression_failures": 0,
+        "compression_attempt_success_rate_pct": 100.0,
+        "failure_fallback_preserved_pct": 100.0,
+        "compression_estimated_overhead_tokens_mean": 5806.0,
+        "compression_latency_ms_p50": 22623.0,
+        "compression_latency_ms_p95": 24611.0,
+        "historical_fact_recall_pct": 100.0,
+        "structured_fact_recall_pct": 100.0,
+        "recent_message_exact_match_pct": 100.0,
+        "authoritative_state_unchanged_pct": 100.0
+      },
+      "comparison": {
+        "main_prompt_token_reduction_pct": 25.83,
+        "net_estimated_token_reduction_pct": 21.17,
+        "final_context_token_reduction_pct": 47.78
+      }
+    },
+    {
+      "turns": 50,
+      "repeats": 3,
+      "control": {
+        "cumulative_prompt_tokens": 347748,
+        "final_context_tokens": 14023,
+        "final_message_count": 100
+      },
+      "treatment": {
+        "cumulative_prompt_tokens_mean": 180347.67,
+        "final_context_tokens_mean": 2158.0,
+        "final_message_count_mean": 13.0,
+        "compression_attempts_total": 9,
+        "compression_calls_total": 9,
+        "compression_calls_mean": 3.0,
+        "compression_failures": 0,
+        "compression_attempt_success_rate_pct": 100.0,
+        "failure_fallback_preserved_pct": 100.0,
+        "compression_estimated_overhead_tokens_mean": 17254.67,
+        "compression_latency_ms_p50": 22408.0,
+        "compression_latency_ms_p95": 24611.0,
+        "historical_fact_recall_pct": 91.67,
+        "structured_fact_recall_pct": 100.0,
+        "recent_message_exact_match_pct": 100.0,
+        "authoritative_state_unchanged_pct": 100.0
+      },
+      "comparison": {
+        "main_prompt_token_reduction_pct": 48.14,
+        "net_estimated_token_reduction_pct": 43.18,
+        "final_context_token_reduction_pct": 84.61
+      }
+    },
+    {
+      "turns": 100,
+      "repeats": 3,
+      "control": {
+        "cumulative_prompt_tokens": 1396699,
+        "final_context_tokens": 28050,
+        "final_message_count": 200
+      },
+      "treatment": {
+        "cumulative_prompt_tokens_mean": 376849.67,
+        "final_context_tokens_mean": 4397.67,
+        "final_message_count_mean": 29.0,
+        "compression_attempts_total": 18,
+        "compression_calls_total": 18,
+        "compression_calls_mean": 6.0,
+        "compression_failures": 0,
+        "compression_attempt_success_rate_pct": 100.0,
+        "failure_fallback_preserved_pct": 100.0,
+        "compression_estimated_overhead_tokens_mean": 34437.33,
+        "compression_latency_ms_p50": 21282.0,
+        "compression_latency_ms_p95": 25399.0,
+        "historical_fact_recall_pct": 91.67,
+        "structured_fact_recall_pct": 100.0,
+        "recent_message_exact_match_pct": 100.0,
+        "authoritative_state_unchanged_pct": 100.0
+      },
+      "comparison": {
+        "main_prompt_token_reduction_pct": 73.02,
+        "net_estimated_token_reduction_pct": 70.55,
+        "final_context_token_reduction_pct": 84.32
+      }
+    }
+  ],
+  "latency_overall": {
+    "compression_attempts": 18,
+    "compression_failures": 0,
+    "p50_ms": 21282.0,
+    "p95_ms": 25399.0,
+    "max_ms": 25399
+  },
+  "quality_gate": {
+    "compression_attempt_success_rate_at_least_90pct": true,
+    "failure_fallback_preserved_100pct": true,
+    "authoritative_state_unchanged_100pct": true,
+    "structured_fact_recall_100pct": true,
+    "recent_message_exact_match_100pct": true,
+    "historical_fact_recall_at_least_90pct": true,
+    "net_reduction_positive_at_50_and_100_turns": true
+  },
+  "quality_gate_passed": true
+}

@@ -1,0 +1,38 @@
+baseline_id: context-compression-ab-2026-07-31
+schema_version: '1.0'
+benchmark: context-compression-ab
+run_mode: live-model-ab
+git_commit: e6161bccf553f1f4e94adf3f4baf7fa781cacfa1
+repository_dirty: true
+source_fingerprint: sha256:a398d074d8a97daa41c5ad1ab120f1f5db38def0740b0026c8d22338241508f2
+commands:
+- python -m tests.benchmarks.context_compression_ab --turns 30 50 100 --repeats 3
+  --trigger-tokens 6000 --keep-recent-turns 6 --max-output-tokens 800 --max-preface-chars
+  6000 --promote-baseline context-compression-ab-2026-07-31
+sample_size:
+  turn_checkpoints:
+  - 30
+  - 50
+  - 100
+  treatment_repeats: 3
+metric_definitions:
+  main_prompt_token_reduction_pct: 1 - treatment cumulative prompt estimate / control
+  net_estimated_token_reduction_pct: 1 - (treatment cumulative prompt estimate + compression
+    estimated overhead) / control
+  compression_latency_ms_p95: nearest-rank p95 of all live compression attempts, including
+    failures
+  fact_recall_pct: matched predefined synthetic fact groups / expected fact groups
+  failure_fallback_preserved_pct: failed attempts that left the complete message state
+    unchanged / failures
+environment:
+  os: Windows-11-10.0.26100-SP0
+  python: 3.13.0
+limitations:
+- Synthetic long-thread benchmark; it does not represent production traffic.
+- Main prompt and compression overhead tokens use the production characters/4 fallback
+  because the Qwen tokenizer is unavailable locally.
+- Main Agent responses are deterministic fixtures; only context summaries invoke the
+  live model.
+- Latency includes the configured remote model endpoint, timeout attempts, and local
+  orchestration.
+replaced_existing_baseline: true
