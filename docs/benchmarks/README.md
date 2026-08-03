@@ -57,23 +57,23 @@ python -m tests.benchmarks.artifact_generation `
   --phase formal `
   --local-docker-services `
   --model-env ../.env `
-  --model-profile structured `
+  --model-profile main `
   --timeout-seconds 600 `
   --promote-baseline artifact-generation-YYYY-MM-DD
 ```
 
-使用 DeepSeek V4 混合思考模型执行工具型 Agent 时，应显式关闭 thinking，避免工具调用后因
-`reasoning_content` 未回传而被兼容接口拒绝：
+通过 DeepSeek 官方 API 执行工具型 Agent 时，可保持模型默认思考模式；正式基线会把该状态记为
+`thinking_mode: null`。只有在目标兼容接口明确要求时，才显式设置：
 
 ```powershell
 $env:MODEL_THINKING_MODE = "disabled"
 ```
 
-该设置会写入实验报告的模型元数据；不得在报告中省略或把 thinking-disabled 与 thinking-enabled
-结果合并统计。
+显式设置会写入实验报告的模型元数据；不得把默认、thinking-disabled 与 thinking-enabled 结果
+合并统计。
 
-运行正式实验前应先执行 `smoke`（3 个样本）和 `pilot`（6 个样本）。只有 pilot 的证据门禁
-与产品阈值都通过、模型额度足以完成全部正式样本时，才运行 `formal` 并晋升 baseline。
+首次接入模型或调整生成链路后，建议先执行 `smoke`（3 个样本）和 `pilot`（6 个样本），再运行
+`formal`；无论是否执行预跑，只有正式实验自身的证据门禁与产品阈值全部通过，才可晋升 baseline。
 当前不依赖 OnlyOffice：PPTX/DOCX 使用 ZIP、XML、OOXML schema 和解析器校验，HTML 使用
 JavaScript 语法及交互结构校验；报告必须明确这不包含 Office 视觉渲染、溢出检查或人工教学审阅。
 

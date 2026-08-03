@@ -1,0 +1,152 @@
+{
+  "schema_version": "1.0",
+  "benchmark": "artifact-generation",
+  "phase": "formal",
+  "started_at": "2026-08-03T09:54:20.594979+00:00",
+  "duration_seconds": 3868.27,
+  "sample_definition": {
+    "case_count": 5,
+    "case_ids": [
+      "math_pythagorean",
+      "chinese_narrative",
+      "physics_projectile",
+      "chemistry_indicator",
+      "computing_sorting"
+    ],
+    "repeats": 2,
+    "artifact_types": [
+      "ppt",
+      "docx",
+      "html-game"
+    ],
+    "expected_attempts": 30,
+    "dataset_fingerprint": "sha256:74e0ee1fde346d96a99db051b7e45bdf91e73ae095f82900a748e220db29a816",
+    "synthetic_inputs": true
+  },
+  "model": {
+    "name": "deepseek-v4-flash",
+    "provider": "openai-compatible",
+    "thinking_mode": null
+  },
+  "runtime": {
+    "workspace_backend": "local",
+    "storage_backend": "minio",
+    "artifact_timeout_seconds": 600,
+    "office_visual_validation": false,
+    "python_utf8_mode": true
+  },
+  "preflight": {
+    "checks": {
+      "database": true,
+      "storage_round_trip": true,
+      "node_dependencies": true,
+      "office_validator": true
+    },
+    "details": {
+      "storage_backend": "minio"
+    }
+  },
+  "aggregate": {
+    "overall": {
+      "attempts": 30,
+      "ready": 29,
+      "pipeline_ready_rate_pct": 96.67,
+      "technical_valid": 29,
+      "technical_valid_rate_pct": 96.67,
+      "quality_passed": 29,
+      "usable_artifact_rate_pct": 96.67,
+      "quality_score_mean": 98.53,
+      "duration_ms_p50": 203473.0,
+      "duration_ms_p95": 479646.0,
+      "duration_ms_max": 600600.0,
+      "llm_calls": 488,
+      "input_tokens": 41229447,
+      "output_tokens": 914125,
+      "total_tokens": 42143572,
+      "tool_calls": 572,
+      "workspace_executions": 137
+    },
+    "by_type": {
+      "ppt": {
+        "attempts": 10,
+        "ready": 10,
+        "pipeline_ready_rate_pct": 100.0,
+        "technical_valid": 10,
+        "technical_valid_rate_pct": 100.0,
+        "quality_passed": 10,
+        "usable_artifact_rate_pct": 100.0,
+        "quality_score_mean": 100.0,
+        "duration_ms_p50": 203473.0,
+        "duration_ms_p95": 231354.0,
+        "duration_ms_max": 231354.0,
+        "llm_calls": 73,
+        "input_tokens": 1829291,
+        "output_tokens": 276975,
+        "total_tokens": 2106266,
+        "tool_calls": 78,
+        "workspace_executions": 13
+      },
+      "docx": {
+        "attempts": 10,
+        "ready": 9,
+        "pipeline_ready_rate_pct": 90.0,
+        "technical_valid": 9,
+        "technical_valid_rate_pct": 90.0,
+        "quality_passed": 9,
+        "usable_artifact_rate_pct": 90.0,
+        "quality_score_mean": 98.61,
+        "duration_ms_p50": 175838.0,
+        "duration_ms_p95": 600600.0,
+        "duration_ms_max": 600600.0,
+        "llm_calls": 232,
+        "input_tokens": 6006325,
+        "output_tokens": 208007,
+        "total_tokens": 6214332,
+        "tool_calls": 278,
+        "workspace_executions": 63
+      },
+      "html-game": {
+        "attempts": 10,
+        "ready": 10,
+        "pipeline_ready_rate_pct": 100.0,
+        "technical_valid": 10,
+        "technical_valid_rate_pct": 100.0,
+        "quality_passed": 10,
+        "usable_artifact_rate_pct": 100.0,
+        "quality_score_mean": 97.0,
+        "duration_ms_p50": 370619.0,
+        "duration_ms_p95": 479646.0,
+        "duration_ms_max": 479646.0,
+        "llm_calls": 183,
+        "input_tokens": 33393831,
+        "output_tokens": 429143,
+        "total_tokens": 33822974,
+        "tool_calls": 216,
+        "workspace_executions": 61
+      }
+    },
+    "batch": {
+      "batches": 10,
+      "all_ready_rate_pct": 90.0,
+      "all_technical_valid_rate_pct": 90.0,
+      "duration_ms_p50": 388300.0,
+      "duration_ms_p95": 600680.0
+    },
+    "failure_categories": {
+      "timeout": 1
+    },
+    "evidence_gate": {
+      "sample_complete": true,
+      "all_ready_outputs_validated": true,
+      "all_failures_classified": true,
+      "batch_count_complete": true
+    },
+    "evidence_gate_passed": true,
+    "product_targets": {
+      "pipeline_ready_rate_at_least_90pct": true,
+      "technical_valid_rate_at_least_90pct": true,
+      "usable_artifact_rate_at_least_80pct": true
+    },
+    "product_targets_met": true
+  }
+}

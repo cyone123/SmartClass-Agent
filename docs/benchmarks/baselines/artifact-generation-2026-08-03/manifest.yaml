@@ -1,0 +1,46 @@
+baseline_id: artifact-generation-2026-08-03
+schema_version: '1.0'
+benchmark: artifact-generation
+run_mode: live-model-artifact-generation
+git_commit: fe4861ce54375ed66f0c51e3253a03300f718383
+repository_dirty: true
+source_fingerprint: sha256:eed950b19c78911c3647c01485d93dd00ac0402e8dc0113db52b27b0691744d5
+dataset_fingerprint: sha256:74e0ee1fde346d96a99db051b7e45bdf91e73ae095f82900a748e220db29a816
+commands:
+- python -m tests.benchmarks.artifact_generation --phase formal --timeout-seconds
+  600 --local-docker-services --model-env ..\.env --model-profile main --promote-baseline
+  artifact-generation-2026-08-03
+sample_size:
+  case_count: 5
+  case_ids:
+  - math_pythagorean
+  - chinese_narrative
+  - physics_projectile
+  - chemistry_indicator
+  - computing_sorting
+  repeats: 2
+  artifact_types:
+  - ppt
+  - docx
+  - html-game
+  expected_attempts: 30
+  dataset_fingerprint: sha256:74e0ee1fde346d96a99db051b7e45bdf91e73ae095f82900a748e220db29a816
+  synthetic_inputs: true
+metric_definitions:
+  pipeline_ready_rate_pct: database ready artifacts / attempted artifacts
+  technical_valid_rate_pct: artifacts passing format, parser and schema validation
+    / attempts
+  usable_artifact_rate_pct: artifacts passing technical gate and deterministic quality
+    rubric / attempts
+  duration_ms_p95: nearest-rank p95 of artifact.generate end-to-end duration
+environment:
+  os: Windows-11-10.0.26100-SP0
+  python: 3.13.0
+limitations:
+- Synthetic five-case benchmark; it does not represent production traffic.
+- OnlyOffice and LibreOffice visual rendering were unavailable and are excluded.
+- PPTX and DOCX are validated through OOXML ZIP/XML/schema and parser checks, not
+  visual overflow inspection.
+- HTML JavaScript receives static syntax and interaction-structure checks, not a full
+  browser automation pass.
+- Quality scores are deterministic rubric scores and are not human ratings.
