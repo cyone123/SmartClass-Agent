@@ -1,0 +1,31 @@
+run_id: structured-output-deepseek-2026-08-06
+schema_version: '1.0'
+benchmark: structured-output-compatibility
+status: exploratory
+root_git_commit: d5495269a26b2eac055622a4386256f48a0a0534
+backend_git_commit: f35d8c690304c4da1f2cd7d2480f296befb93bbc
+environment:
+  python: 3.13.0
+  structured_model: deepseek-v4-flash
+  structured_base_url: 'https://api.deepseek.com'
+  structured_method_in_graph: provider_default_for_deepseek
+  structured_strict_in_graph: omitted_for_deepseek
+tests:
+  - name: graph_provider_default
+    method_argument: omitted
+    strict_argument: omitted
+    thinking_override: none
+    result: failed
+  - name: explicit_function_calling
+    method_argument: function_calling
+    strict_argument: omitted
+    thinking_override: none
+    result: failed
+  - name: function_calling_with_thinking_disabled
+    method_argument: function_calling
+    strict_argument: omitted
+    thinking_override: disabled
+    result: passed
+gate:
+  structured_output_ready_for_requested_mode: false
+  pressure_run_started: false

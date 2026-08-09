@@ -1,17 +1,17 @@
 **SmartClass Agent 智能教学助手平台**
 
-**2026.03 - 2026.06**
+**2026.03 - 至今**
 
-https://github.com/cyone123/SmartClass-Agent
+[github.com/cyone123/SmartClass-Agent](https://github.com/cyone123/SmartClass-Agent)
 
-**技术栈**：`FastAPI`、`LangGraph`、`LangChain`、`PostgreSQL/PGVector`、`MinIO`、`JWT`、`OpenTelemetry`、`Prometheus`、`Vue 3`、`OnlyOffice`
+**技术栈**：`FastAPI`、`LangGraph`、`LangChain`、`PostgreSQL/PGVector`、`MinIO`、`OpenTelemetry`、`Prometheus`、`Vue 3`、`OnlyOffice`
 
-面向教师备课中“资料分散、教案/课件制作耗时、生成内容难以持续迭代”等问题，构建智能 Agent 平台，打通从教学需求输入、教学设计，到课件生成、预览和差量修改的端到端流程。
+面向教师备课资料分散、教案与课件制作耗时、生成内容难以持续迭代等痛点，独立设计并实现多模态教学 Agent 平台，打通“需求澄清—教学设计—知识检索—产物生成—在线预览—差量修改”全流程。
 
-- 基于 LangGraph 固定 **Workflow + Sub-Agent** 混合架构设计可控 Agent 流程，主 Workflow 保障流程确定性、审批中断和状态恢复，Sub-Agent 负责复杂产物生成与修改，兼顾可控性与扩展性。
-- 设计 Profile（稳定画像）+ Experience（动态经验）双层**长期记忆**，支持自动检索、反思写入、更新及前端 CRUD 管理；构建 8 个真实模型记忆用例，检索/写入/更新评估通过率 **100%**，并以资格门与确定性脱敏阻止闲聊和敏感临时上下文进入长期记忆。
-- 针对教师长程备课场景设计**上下文压缩策略**，超过阈值后自动总结历史消息并保留近期对话、教学元数据及生成状态；在 30/50/100 轮合成长对话 A/B 实验中，按生产估算口径并计入摘要调用开销后，累计 Token 净降低 **21.2%/43.2%/70.6%**，18 次真实模型压缩中结构化状态与近期 6 轮消息精确保留率 **100%**。
-- 构建 PPTX、DOCX、HTML 三类**产物生成 Sub-Agent**及统一存储链路；在 5 个跨学科场景、2 次重复的 30 次真实模型实验中，产物 Ready、技术有效及确定性质量门禁通过率均达 **96.67%（29/30）**，PPTX/HTML 均为 **10/10**，单产物生成耗时 p50/p95 为 **203.47s/479.65s**，失败可通过 trace 归因为 DOCX 超时。
-- 设计 **Harness** 执行层，对 Skill 和工具调用进行权限校验、路径白名单校验、超时中断、输出截断及失败重试，使 Agent 执行更稳定、安全。
-- 实现 **Sub-Agent 沙箱**执行能力，支持本地 workspace 与 Daytona 云沙箱双执行后端，统一管理文件同步、代码运行、超时控制和资源清理，降低模型生成代码或处理复杂文件时对宿主环境的风险。
-- 建设 Agent **可观测性与评估闭环**，采集 LLM 请求、Tool 调用与 Workflow 耗时，沉淀覆盖 6 类行为的 **24 个评估用例**（20 个真实模型 + 4 个确定性用例）；基线 **23/24 通过（95.8%）且 0 ERROR**，并以分类通过率门禁防止核心行为回退。
+- 基于 **LangGraph** 设计确定性 Workflow 与产物 Sub-Agent 协同架构，以状态机编排意图识别、要素抽取、RAG 和产物路由；通过 Checkpoint 支持 **3 类 Human-in-the-loop 审批中断与恢复**，兼顾复杂任务自治与关键环节可控。
+- 设计 **Profile + Experience 双层长期记忆**，按用户 Namespace 隔离并实现检索、反思写入、冲突更新及可视化 CRUD；引入写入资格门和确定性脱敏，阻止闲聊及敏感临时信息沉淀，**8 个真实模型记忆用例全部通过**。
+- 面向长程备课设计上下文压缩机制，保留结构化教学状态与近期对话；在 30/50/100 轮合成长对话 A/B 实验中，计入摘要调用开销后累计 Prompt Token 估算量净降低 **21.2%/43.2%/70.6%**，18/18 次真实模型压缩成功，结构化状态与近期 6 轮消息保留率 **100%**。
+- 构建 **PPTX、DOCX、HTML** 三类产物生成与 Revision 差量修改链路，统一接入 Artifact、SSE 和 MinIO 存储体系；30 次跨学科真实模型实验中 **29 次产物可用（96.7%）**，PPTX/HTML 均为 **10/10**，唯一失败通过 Trace 定位为 DOCX 生成超时。
+- 建设受控 **Agent Harness**：以 Policy Middleware 约束 Skill/Tool 权限，提供路径穿越防护、执行超时、输出截断、失败重试及依赖安装限制；抽象本地 Workspace 与 **Daytona 云沙箱**双执行后端，统一文件同步、代码执行和资源回收，隔离模型生成代码对宿主环境的影响。
+- 搭建贯穿 LLM、Tool、RAG、Storage、Workspace 与 Artifact 的可观测体系，以统一 RunContext 串联结构化日志、OpenTelemetry Trace 和 Prometheus Metrics；沉淀 **6 类 24 个评估用例**及分类回归门禁，真实模型基线 **23/24 通过（95.8%），运行错误率 0%**。
+- 建立认证 SSE 链路的分层压测与故障归因机制：24 个 Locust 窗口累计 **26,128 次请求**，Mock LLM 下 24,457 次请求零失败、完整请求 p95 ≤ 590ms；真实 DeepSeek 在 1/2/4 路并发下零失败、TTFT p95 ≤ 2.8s，8 路成功率 **99.11%**，并将失败归因至上游 120s 无流式 Chunk 超时。

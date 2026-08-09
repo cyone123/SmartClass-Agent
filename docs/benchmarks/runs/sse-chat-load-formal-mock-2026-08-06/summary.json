@@ -1,0 +1,868 @@
+{
+  "schema_version": "1.0",
+  "benchmark": "sse-chat-load-formal-baseline",
+  "generated_at": "2026-08-06T15:42:43.460707+00:00",
+  "matrix": {
+    "rounds": 3,
+    "concurrency_stages": [
+      1,
+      2,
+      4,
+      8
+    ],
+    "input_modes": [
+      "mock"
+    ]
+  },
+  "gate": {
+    "passed": true,
+    "expected_windows": 12,
+    "completed_windows": 12
+  },
+  "stages": [
+    {
+      "mode": "mock",
+      "users": 1,
+      "rounds_expected": 3,
+      "windows_completed": 3,
+      "requests": 2122,
+      "failures": 0,
+      "failure_rate_pct": 0.0,
+      "all_windows_pass": true,
+      "full_latency_ms": {
+        "p50_per_window": [
+          200.0,
+          230.0,
+          230.0
+        ],
+        "p50_range": {
+          "min": 200.0,
+          "max": 230.0
+        },
+        "p95_per_window": [
+          230.0,
+          230.0,
+          230.0
+        ],
+        "p95_range": {
+          "min": 230.0,
+          "max": 230.0
+        },
+        "max_across_windows": 440.0
+      },
+      "ttft_ms": {
+        "p50_per_window": [
+          93.0,
+          110.0,
+          110.0
+        ],
+        "p50_range": {
+          "min": 93.0,
+          "max": 110.0
+        },
+        "p95_per_window": [
+          110.0,
+          110.0,
+          110.0
+        ],
+        "p95_range": {
+          "min": 110.0,
+          "max": 110.0
+        },
+        "max_across_windows": 140.0
+      },
+      "resources": {
+        "samples": 891,
+        "observed_seconds": 299.09,
+        "working_set_mb": {
+          "p95_across_windows": 373.62,
+          "max_across_windows": 374.2
+        },
+        "private_memory_mb": {
+          "p95_across_windows": 729.88,
+          "max_across_windows": 729.93
+        },
+        "cpu_percent": {
+          "p95_across_windows": 1.68,
+          "max_across_windows": 2.32
+        },
+        "thread_count": {
+          "p95_across_windows": 21.0,
+          "max_across_windows": 23.0
+        },
+        "handle_count": {
+          "p95_across_windows": 300.0,
+          "max_across_windows": 306.0
+        }
+      },
+      "error_reasons": [],
+      "windows": [
+        {
+          "file": "mock-r1-1u.json",
+          "mode": "mock",
+          "round": 1,
+          "users": 1,
+          "requests": 724,
+          "failures": 0,
+          "failure_rate_pct": 0.0,
+          "full_latency_ms": {
+            "p50": 200.0,
+            "p95": 230.0,
+            "max": 260.0
+          },
+          "ttft_ms": {
+            "p50": 93.0,
+            "p95": 110.0,
+            "max": 140.0
+          },
+          "error_reasons": [],
+          "resource": {
+            "samples": 297,
+            "observed_seconds": 299.2,
+            "working_set_mb": {
+              "p95": 367.24,
+              "max": 367.3
+            },
+            "private_memory_mb": {
+              "p95": 723.02,
+              "max": 723.07
+            },
+            "cpu_percent": {
+              "p95": 1.68,
+              "max": 2.32
+            },
+            "thread_count": {
+              "p95": 19.0,
+              "max": 20.0
+            },
+            "handle_count": {
+              "p95": 280.0,
+              "max": 283.0
+            }
+          }
+        },
+        {
+          "file": "mock-r2-1u.json",
+          "mode": "mock",
+          "round": 2,
+          "users": 1,
+          "requests": 701,
+          "failures": 0,
+          "failure_rate_pct": 0.0,
+          "full_latency_ms": {
+            "p50": 230.0,
+            "p95": 230.0,
+            "max": 440.0
+          },
+          "ttft_ms": {
+            "p50": 110.0,
+            "p95": 110.0,
+            "max": 140.0
+          },
+          "error_reasons": [],
+          "resource": {
+            "samples": 297,
+            "observed_seconds": 299.29,
+            "working_set_mb": {
+              "p95": 372.89,
+              "max": 372.93
+            },
+            "private_memory_mb": {
+              "p95": 728.87,
+              "max": 728.97
+            },
+            "cpu_percent": {
+              "p95": 1.67,
+              "max": 2.19
+            },
+            "thread_count": {
+              "p95": 21.0,
+              "max": 23.0
+            },
+            "handle_count": {
+              "p95": 299.0,
+              "max": 306.0
+            }
+          }
+        },
+        {
+          "file": "mock-r3-1u.json",
+          "mode": "mock",
+          "round": 3,
+          "users": 1,
+          "requests": 697,
+          "failures": 0,
+          "failure_rate_pct": 0.0,
+          "full_latency_ms": {
+            "p50": 230.0,
+            "p95": 230.0,
+            "max": 260.0
+          },
+          "ttft_ms": {
+            "p50": 110.0,
+            "p95": 110.0,
+            "max": 140.0
+          },
+          "error_reasons": [],
+          "resource": {
+            "samples": 297,
+            "observed_seconds": 299.09,
+            "working_set_mb": {
+              "p95": 373.62,
+              "max": 374.2
+            },
+            "private_memory_mb": {
+              "p95": 729.88,
+              "max": 729.93
+            },
+            "cpu_percent": {
+              "p95": 1.56,
+              "max": 2.06
+            },
+            "thread_count": {
+              "p95": 21.0,
+              "max": 22.0
+            },
+            "handle_count": {
+              "p95": 300.0,
+              "max": 304.0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "mode": "mock",
+      "users": 2,
+      "rounds_expected": 3,
+      "windows_completed": 3,
+      "requests": 4234,
+      "failures": 0,
+      "failure_rate_pct": 0.0,
+      "all_windows_pass": true,
+      "full_latency_ms": {
+        "p50_per_window": [
+          200.0,
+          230.0,
+          230.0
+        ],
+        "p50_range": {
+          "min": 200.0,
+          "max": 230.0
+        },
+        "p95_per_window": [
+          230.0,
+          240.0,
+          240.0
+        ],
+        "p95_range": {
+          "min": 230.0,
+          "max": 240.0
+        },
+        "max_across_windows": 390.0
+      },
+      "ttft_ms": {
+        "p50_per_window": [
+          92.0,
+          95.0,
+          94.0
+        ],
+        "p50_range": {
+          "min": 92.0,
+          "max": 95.0
+        },
+        "p95_per_window": [
+          110.0,
+          110.0,
+          110.0
+        ],
+        "p95_range": {
+          "min": 110.0,
+          "max": 110.0
+        },
+        "max_across_windows": 280.0
+      },
+      "resources": {
+        "samples": 893,
+        "observed_seconds": 299.01,
+        "working_set_mb": {
+          "p95_across_windows": 373.71,
+          "max_across_windows": 373.77
+        },
+        "private_memory_mb": {
+          "p95_across_windows": 729.91,
+          "max_across_windows": 730.0
+        },
+        "cpu_percent": {
+          "p95_across_windows": 2.84,
+          "max_across_windows": 3.49
+        },
+        "thread_count": {
+          "p95_across_windows": 22.0,
+          "max_across_windows": 23.0
+        },
+        "handle_count": {
+          "p95_across_windows": 303.0,
+          "max_across_windows": 307.0
+        }
+      },
+      "error_reasons": [],
+      "windows": [
+        {
+          "file": "mock-r1-2u.json",
+          "mode": "mock",
+          "round": 1,
+          "users": 2,
+          "requests": 1442,
+          "failures": 0,
+          "failure_rate_pct": 0.0,
+          "full_latency_ms": {
+            "p50": 200.0,
+            "p95": 230.0,
+            "max": 390.0
+          },
+          "ttft_ms": {
+            "p50": 92.0,
+            "p95": 110.0,
+            "max": 280.0
+          },
+          "error_reasons": [],
+          "resource": {
+            "samples": 297,
+            "observed_seconds": 299.01,
+            "working_set_mb": {
+              "p95": 368.45,
+              "max": 368.53
+            },
+            "private_memory_mb": {
+              "p95": 724.66,
+              "max": 724.78
+            },
+            "cpu_percent": {
+              "p95": 2.83,
+              "max": 3.35
+            },
+            "thread_count": {
+              "p95": 20.0,
+              "max": 22.0
+            },
+            "handle_count": {
+              "p95": 285.0,
+              "max": 288.0
+            }
+          }
+        },
+        {
+          "file": "mock-r2-2u.json",
+          "mode": "mock",
+          "round": 2,
+          "users": 2,
+          "requests": 1397,
+          "failures": 0,
+          "failure_rate_pct": 0.0,
+          "full_latency_ms": {
+            "p50": 230.0,
+            "p95": 240.0,
+            "max": 350.0
+          },
+          "ttft_ms": {
+            "p50": 95.0,
+            "p95": 110.0,
+            "max": 230.0
+          },
+          "error_reasons": [],
+          "resource": {
+            "samples": 298,
+            "observed_seconds": 299.77,
+            "working_set_mb": {
+              "p95": 372.92,
+              "max": 372.95
+            },
+            "private_memory_mb": {
+              "p95": 728.93,
+              "max": 728.95
+            },
+            "cpu_percent": {
+              "p95": 2.84,
+              "max": 3.24
+            },
+            "thread_count": {
+              "p95": 22.0,
+              "max": 23.0
+            },
+            "handle_count": {
+              "p95": 303.0,
+              "max": 304.0
+            }
+          }
+        },
+        {
+          "file": "mock-r3-2u.json",
+          "mode": "mock",
+          "round": 3,
+          "users": 2,
+          "requests": 1395,
+          "failures": 0,
+          "failure_rate_pct": 0.0,
+          "full_latency_ms": {
+            "p50": 230.0,
+            "p95": 240.0,
+            "max": 390.0
+          },
+          "ttft_ms": {
+            "p50": 94.0,
+            "p95": 110.0,
+            "max": 270.0
+          },
+          "error_reasons": [],
+          "resource": {
+            "samples": 298,
+            "observed_seconds": 299.85,
+            "working_set_mb": {
+              "p95": 373.71,
+              "max": 373.77
+            },
+            "private_memory_mb": {
+              "p95": 729.91,
+              "max": 730.0
+            },
+            "cpu_percent": {
+              "p95": 2.84,
+              "max": 3.49
+            },
+            "thread_count": {
+              "p95": 22.0,
+              "max": 23.0
+            },
+            "handle_count": {
+              "p95": 303.0,
+              "max": 307.0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "mode": "mock",
+      "users": 4,
+      "rounds_expected": 3,
+      "windows_completed": 3,
+      "requests": 7716,
+      "failures": 0,
+      "failure_rate_pct": 0.0,
+      "all_windows_pass": true,
+      "full_latency_ms": {
+        "p50_per_window": [
+          250.0,
+          260.0,
+          260.0
+        ],
+        "p50_range": {
+          "min": 250.0,
+          "max": 260.0
+        },
+        "p95_per_window": [
+          320.0,
+          320.0,
+          320.0
+        ],
+        "p95_range": {
+          "min": 320.0,
+          "max": 320.0
+        },
+        "max_across_windows": 600.0
+      },
+      "ttft_ms": {
+        "p50_per_window": [
+          110.0,
+          110.0,
+          110.0
+        ],
+        "p50_range": {
+          "min": 110.0,
+          "max": 110.0
+        },
+        "p95_per_window": [
+          140.0,
+          140.0,
+          140.0
+        ],
+        "p95_range": {
+          "min": 140.0,
+          "max": 140.0
+        },
+        "max_across_windows": 440.0
+      },
+      "resources": {
+        "samples": 891,
+        "observed_seconds": 299.76,
+        "working_set_mb": {
+          "p95_across_windows": 374.2,
+          "max_across_windows": 374.27
+        },
+        "private_memory_mb": {
+          "p95_across_windows": 730.93,
+          "max_across_windows": 731.07
+        },
+        "cpu_percent": {
+          "p95_across_windows": 4.88,
+          "max_across_windows": 5.97
+        },
+        "thread_count": {
+          "p95_across_windows": 22.0,
+          "max_across_windows": 24.0
+        },
+        "handle_count": {
+          "p95_across_windows": 307.0,
+          "max_across_windows": 312.0
+        }
+      },
+      "error_reasons": [],
+      "windows": [
+        {
+          "file": "mock-r1-4u.json",
+          "mode": "mock",
+          "round": 1,
+          "users": 4,
+          "requests": 2583,
+          "failures": 0,
+          "failure_rate_pct": 0.0,
+          "full_latency_ms": {
+            "p50": 250.0,
+            "p95": 320.0,
+            "max": 570.0
+          },
+          "ttft_ms": {
+            "p50": 110.0,
+            "p95": 140.0,
+            "max": 440.0
+          },
+          "error_reasons": [],
+          "resource": {
+            "samples": 297,
+            "observed_seconds": 299.76,
+            "working_set_mb": {
+              "p95": 370.27,
+              "max": 370.43
+            },
+            "private_memory_mb": {
+              "p95": 726.73,
+              "max": 726.95
+            },
+            "cpu_percent": {
+              "p95": 4.77,
+              "max": 5.62
+            },
+            "thread_count": {
+              "p95": 21.0,
+              "max": 23.0
+            },
+            "handle_count": {
+              "p95": 302.0,
+              "max": 305.0
+            }
+          }
+        },
+        {
+          "file": "mock-r2-4u.json",
+          "mode": "mock",
+          "round": 2,
+          "users": 4,
+          "requests": 2569,
+          "failures": 0,
+          "failure_rate_pct": 0.0,
+          "full_latency_ms": {
+            "p50": 260.0,
+            "p95": 320.0,
+            "max": 600.0
+          },
+          "ttft_ms": {
+            "p50": 110.0,
+            "p95": 140.0,
+            "max": 390.0
+          },
+          "error_reasons": [],
+          "resource": {
+            "samples": 297,
+            "observed_seconds": 299.83,
+            "working_set_mb": {
+              "p95": 373.34,
+              "max": 373.39
+            },
+            "private_memory_mb": {
+              "p95": 728.94,
+              "max": 729.07
+            },
+            "cpu_percent": {
+              "p95": 4.88,
+              "max": 5.97
+            },
+            "thread_count": {
+              "p95": 22.0,
+              "max": 24.0
+            },
+            "handle_count": {
+              "p95": 307.0,
+              "max": 311.0
+            }
+          }
+        },
+        {
+          "file": "mock-r3-4u.json",
+          "mode": "mock",
+          "round": 3,
+          "users": 4,
+          "requests": 2564,
+          "failures": 0,
+          "failure_rate_pct": 0.0,
+          "full_latency_ms": {
+            "p50": 260.0,
+            "p95": 320.0,
+            "max": 580.0
+          },
+          "ttft_ms": {
+            "p50": 110.0,
+            "p95": 140.0,
+            "max": 350.0
+          },
+          "error_reasons": [],
+          "resource": {
+            "samples": 297,
+            "observed_seconds": 299.86,
+            "working_set_mb": {
+              "p95": 374.2,
+              "max": 374.27
+            },
+            "private_memory_mb": {
+              "p95": 730.93,
+              "max": 731.07
+            },
+            "cpu_percent": {
+              "p95": 4.77,
+              "max": 5.76
+            },
+            "thread_count": {
+              "p95": 22.0,
+              "max": 24.0
+            },
+            "handle_count": {
+              "p95": 307.0,
+              "max": 312.0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "mode": "mock",
+      "users": 8,
+      "rounds_expected": 3,
+      "windows_completed": 3,
+      "requests": 10385,
+      "failures": 0,
+      "failure_rate_pct": 0.0,
+      "all_windows_pass": true,
+      "full_latency_ms": {
+        "p50_per_window": [
+          500.0,
+          510.0,
+          510.0
+        ],
+        "p50_range": {
+          "min": 500.0,
+          "max": 510.0
+        },
+        "p95_per_window": [
+          590.0,
+          590.0,
+          590.0
+        ],
+        "p95_range": {
+          "min": 590.0,
+          "max": 590.0
+        },
+        "max_across_windows": 1400.0
+      },
+      "ttft_ms": {
+        "p50_per_window": [
+          150.0,
+          150.0,
+          150.0
+        ],
+        "p50_range": {
+          "min": 150.0,
+          "max": 150.0
+        },
+        "p95_per_window": [
+          240.0,
+          240.0,
+          240.0
+        ],
+        "p95_range": {
+          "min": 240.0,
+          "max": 240.0
+        },
+        "max_across_windows": 910.0
+      },
+      "resources": {
+        "samples": 894,
+        "observed_seconds": 299.53,
+        "working_set_mb": {
+          "p95_across_windows": 375.66,
+          "max_across_windows": 375.8
+        },
+        "private_memory_mb": {
+          "p95_across_windows": 732.5,
+          "max_across_windows": 732.7
+        },
+        "cpu_percent": {
+          "p95_across_windows": 6.45,
+          "max_across_windows": 8.18
+        },
+        "thread_count": {
+          "p95_across_windows": 24.0,
+          "max_across_windows": 26.0
+        },
+        "handle_count": {
+          "p95_across_windows": 318.0,
+          "max_across_windows": 329.0
+        }
+      },
+      "error_reasons": [],
+      "windows": [
+        {
+          "file": "mock-r1-8u.json",
+          "mode": "mock",
+          "round": 1,
+          "users": 8,
+          "requests": 3468,
+          "failures": 0,
+          "failure_rate_pct": 0.0,
+          "full_latency_ms": {
+            "p50": 500.0,
+            "p95": 590.0,
+            "max": 1400.0
+          },
+          "ttft_ms": {
+            "p50": 150.0,
+            "p95": 240.0,
+            "max": 910.0
+          },
+          "error_reasons": [],
+          "resource": {
+            "samples": 298,
+            "observed_seconds": 299.53,
+            "working_set_mb": {
+              "p95": 372.86,
+              "max": 372.96
+            },
+            "private_memory_mb": {
+              "p95": 728.99,
+              "max": 729.06
+            },
+            "cpu_percent": {
+              "p95": 6.45,
+              "max": 8.18
+            },
+            "thread_count": {
+              "p95": 24.0,
+              "max": 26.0
+            },
+            "handle_count": {
+              "p95": 316.0,
+              "max": 329.0
+            }
+          }
+        },
+        {
+          "file": "mock-r2-8u.json",
+          "mode": "mock",
+          "round": 2,
+          "users": 8,
+          "requests": 3455,
+          "failures": 0,
+          "failure_rate_pct": 0.0,
+          "full_latency_ms": {
+            "p50": 510.0,
+            "p95": 590.0,
+            "max": 1200.0
+          },
+          "ttft_ms": {
+            "p50": 150.0,
+            "p95": 240.0,
+            "max": 790.0
+          },
+          "error_reasons": [],
+          "resource": {
+            "samples": 298,
+            "observed_seconds": 299.67,
+            "working_set_mb": {
+              "p95": 374.11,
+              "max": 374.2
+            },
+            "private_memory_mb": {
+              "p95": 730.0,
+              "max": 730.07
+            },
+            "cpu_percent": {
+              "p95": 6.27,
+              "max": 7.67
+            },
+            "thread_count": {
+              "p95": 23.0,
+              "max": 24.0
+            },
+            "handle_count": {
+              "p95": 314.0,
+              "max": 319.0
+            }
+          }
+        },
+        {
+          "file": "mock-r3-8u.json",
+          "mode": "mock",
+          "round": 3,
+          "users": 8,
+          "requests": 3462,
+          "failures": 0,
+          "failure_rate_pct": 0.0,
+          "full_latency_ms": {
+            "p50": 510.0,
+            "p95": 590.0,
+            "max": 1300.0
+          },
+          "ttft_ms": {
+            "p50": 150.0,
+            "p95": 240.0,
+            "max": 850.0
+          },
+          "error_reasons": [],
+          "resource": {
+            "samples": 298,
+            "observed_seconds": 299.7,
+            "working_set_mb": {
+              "p95": 375.66,
+              "max": 375.8
+            },
+            "private_memory_mb": {
+              "p95": 732.5,
+              "max": 732.7
+            },
+            "cpu_percent": {
+              "p95": 6.44,
+              "max": 7.54
+            },
+            "thread_count": {
+              "p95": 24.0,
+              "max": 26.0
+            },
+            "handle_count": {
+              "p95": 318.0,
+              "max": 322.0
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

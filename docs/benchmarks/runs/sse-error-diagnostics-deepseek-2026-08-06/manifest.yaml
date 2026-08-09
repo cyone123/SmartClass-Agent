@@ -1,0 +1,33 @@
+run_id: sse-error-diagnostics-deepseek-2026-08-06
+schema_version: '1.0'
+benchmark: sse-error-diagnostics
+status: exploratory
+source_run: sse-chat-load-deepseek-2026-08-06
+run_mode: live-http-sse
+root_git_commit: d5495269a26b2eac055622a4386256f48a0a0534
+backend_git_commit: f35d8c690304c4da1f2cd7d2480f296befb93bbc
+environment:
+  os: Windows-11-10.0.26100-SP0
+  python: 3.13.0
+  locust: 2.46.3
+  primary_model: deepseek-v4-flash
+  primary_base_url: 'https://api.deepseek.com'
+  structured_method: json_schema
+  structured_strict: true
+  rag: disabled-by-workload
+load:
+  users: 8
+  duration: 60s
+  spawn_rate: 8
+  stream_attempts: 1022
+  stream_failures: 1019
+  http_non_200_responses: 0
+diagnostic_contract:
+  capture: sanitized SSE error payload fields only
+  fields: [category, reason, error_type, message]
+  max_message_chars: 240
+  raw_error_body_persisted: false
+limitations:
+  - The diagnostic run is not a capacity baseline because fast validation failures caused users to retry rapidly.
+  - The backend SSE payload only exposed message; category and provider type were inferred when embedded in the message.
+  - This run does not measure RAG latency or retrieval quality.

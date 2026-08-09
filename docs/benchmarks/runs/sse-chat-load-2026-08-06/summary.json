@@ -1,0 +1,80 @@
+{
+  "schema_version": "1.0",
+  "benchmark": "sse-chat-load",
+  "status": "exploratory",
+  "complete_stream_attempts": {
+    "1_users": 3,
+    "2_users": 6,
+    "4_users_trial_a": 27,
+    "4_users_trial_b": 22,
+    "8_users": 84
+  },
+  "complete_stream_failures": {
+    "1_users": 0,
+    "2_users": 0,
+    "4_users_trial_a": 3,
+    "4_users_trial_b": 0,
+    "8_users": 66
+  },
+  "stages": [
+    {
+      "users": 1,
+      "attempts": 3,
+      "failures": 0,
+      "failure_rate_pct": 0.0,
+      "full_stream_latency_ms": {"p50": 11000, "p95": 43000, "max": 43000},
+      "ttft_successful_samples": 3,
+      "ttft_ms": {"p50": 4500, "p95": 38000, "max": 38000}
+    },
+    {
+      "users": 2,
+      "attempts": 6,
+      "failures": 0,
+      "failure_rate_pct": 0.0,
+      "full_stream_latency_ms": {"p50": 12000, "p95": 44000, "max": 44000},
+      "ttft_successful_samples": 5,
+      "ttft_ms": {"p50": 7100, "p95": 39000, "max": 39000}
+    },
+    {
+      "users": 4,
+      "trial": "a",
+      "attempts": 27,
+      "failures": 3,
+      "failure_rate_pct": 11.11,
+      "full_stream_latency_ms": {"p50": 8400, "p95": 16000, "max": 16000},
+      "ttft_successful_samples": 21,
+      "ttft_ms": {"p50": 4600, "p95": 10000, "max": 10000}
+    },
+    {
+      "users": 4,
+      "trial": "b",
+      "attempts": 22,
+      "failures": 0,
+      "failure_rate_pct": 0.0,
+      "full_stream_latency_ms": {"p50": 11000, "p95": 17000, "max": 18000},
+      "ttft_successful_samples": 19,
+      "ttft_ms": {"p50": 5300, "p95": 9900, "max": 9900}
+    },
+    {
+      "users": 8,
+      "attempts": 84,
+      "failures": 66,
+      "failure_rate_pct": 78.57,
+      "successful_streams": 18,
+      "full_stream_latency_ms": {"p50": 4900, "p95": 10000, "max": 16000},
+      "ttft_successful_samples": 12,
+      "ttft_ms": {"p50": 8500, "p95": 14000, "max": 14000}
+    }
+  ],
+  "four_user_combined": {
+    "attempts": 49,
+    "failures": 3,
+    "failure_rate_pct": 6.12
+  },
+  "process_snapshot_after_run": {
+    "working_set_mb": 378.07,
+    "private_memory_mb": 733.33,
+    "note": "single end-of-run snapshot; not peak"
+  },
+  "resume_ready": false
+}

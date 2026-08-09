@@ -1,0 +1,44 @@
+run_id: sse-chat-load-deepseek-2026-08-06
+schema_version: '1.0'
+benchmark: sse-chat-load
+status: exploratory
+run_mode: live-http-sse
+root_git_commit: d5495269a26b2eac055622a4386256f48a0a0534
+backend_git_commit: f35d8c690304c4da1f2cd7d2480f296befb93bbc
+repository_dirty: true
+environment:
+  os: Windows-11-10.0.26100-SP0
+  python: 3.13.0
+  locust: 2.46.3
+  backend: single-host uvicorn process
+  database: local PostgreSQL container
+  storage: local filesystem
+  primary_model_provider: deepseek
+  primary_model: deepseek-v4-flash
+  primary_base_url: 'https://api.deepseek.com'
+  auxiliary_model_configuration: not independently normalized for this run
+  rag: disabled-by-workload
+commands:
+  smoke: python -m locust -f tests/benchmarks/sse_load.py --headless --host http://127.0.0.1:8000 -u 1 -r 1 -t 30s
+  stages: 1/2/4/8 users, each 60s, spawn rate equal to users
+  repeat: 4 users, 60s
+sample_size:
+  smoke: 3
+  1_users: 8
+  2_users: 15
+  4_users_trial_a: 23
+  4_users_trial_b: 21
+  8_users: 60
+metric_definitions:
+  complete_stream: metadata + at least one token + done, with no error event
+  complete_stream_failure_rate: failed complete streams / complete stream attempts
+  ttft: request start to first token event
+  full_stream_latency: request start to end of SSE body after done or error
+limitations:
+  - The primary model endpoint was switched to DeepSeek, but auxiliary model variables were not independently normalized.
+  - Only live-model HTTP-SSE was measured; no mock-LLM service-capacity control run.
+  - Error event bodies were not persisted, so upstream-versus-backend attribution remains unresolved.
+  - One 60-second trial per stage plus one 4-user repeat is insufficient for a production SLO or stable p95 claim.
+  - CPU and memory values are an end-of-run process snapshot, not a sampled peak.
+  - The backend ran as host Uvicorn with local PostgreSQL/filesystem; the Docker image build was not part of this run.
+  - This run does not measure RAG latency or retrieval quality.

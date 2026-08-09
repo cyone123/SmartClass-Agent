@@ -1,0 +1,40 @@
+{
+  "schema_version": "1.0",
+  "benchmark": "structured-output-compatibility",
+  "status": "exploratory",
+  "model": "deepseek-v4-flash",
+  "tests": [
+    {
+      "name": "graph_provider_default",
+      "method_argument": "omitted",
+      "strict_argument": "omitted",
+      "result": "failed",
+      "error_type": "invalid_request_error",
+      "error_message": "Error code: 400 - This response_format type is unavailable now"
+    },
+    {
+      "name": "explicit_function_calling",
+      "method_argument": "function_calling",
+      "strict_argument": "omitted",
+      "result": "failed",
+      "error_type": "invalid_request_error",
+      "error_message": "Error code: 400 - Thinking mode does not support this tool_choice"
+    },
+    {
+      "name": "function_calling_with_thinking_disabled",
+      "method_argument": "function_calling",
+      "strict_argument": "omitted",
+      "thinking_override": "disabled",
+      "result": "passed",
+      "parsed_type": "ConversationRoute",
+      "parsed": {
+        "intent": "normal_chat",
+        "artifact_targets": [],
+        "needs_clarification": false
+      },
+      "parsing_error": null
+    }
+  ],
+  "pressure_run_started": false,
+  "resume_ready": false
+}

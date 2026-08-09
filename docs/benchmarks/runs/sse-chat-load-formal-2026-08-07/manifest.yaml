@@ -1,0 +1,36 @@
+schema_version: "1.0"
+benchmark: "sse-chat-load-formal"
+run_id: "sse-chat-load-formal-2026-08-07"
+created_at: "2026-08-07"
+promotion_status: "not_promoted"
+promotion_reason: "Mock passed all windows; DeepSeek 8-user stage recorded 7 timeout failures in 788 requests, so the stability gate is intentionally not marked passed."
+workload:
+  endpoint: "/api/chat/stream"
+  scenario: "authenticated non-RAG normal chat"
+  prompt_policy: "fixed prompt; prompt text excluded from evidence"
+  duration_seconds: 300
+  rounds: 3
+  concurrency_users: [1, 2, 4, 8]
+  resource_sample_interval_seconds: 1
+modes:
+  - id: "mock"
+    provider: "local-openai-compatible-mock"
+    model: "mock-model"
+    delay_ms: 20
+    purpose: "attribute service/auth/SSE/orchestration overhead"
+  - id: "live"
+    provider: "DeepSeek"
+    model: "deepseek-v4-flash"
+    structured_output_method: "function_calling"
+    structured_thinking: "disabled"
+    purpose: "measure user-visible model-backed latency"
+evidence:
+  summary: "summary.json"
+  report: "report.md"
+  raw_mock_dir: "../../raw/sse-formal-mock-20260806-v2"
+  raw_live_dir: "../../raw/sse-formal-deepseek-20260806"
+  metric_definition: "A request passes only when metadata, at least one token, and done are observed with no error event."
+limitations:
+  - "Mock latency is deterministic and is not a model-quality or provider-latency substitute."
+  - "The live 8-user timeout is retained as an observed provider/streaming stability result."
+  - "RAG retrieval, artifact generation, and quality evaluation are out of scope."

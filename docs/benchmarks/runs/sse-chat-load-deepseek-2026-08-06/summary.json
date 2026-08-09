@@ -1,0 +1,96 @@
+{
+  "schema_version": "1.0",
+  "benchmark": "sse-chat-load",
+  "status": "exploratory",
+  "primary_model_provider": "deepseek",
+  "primary_model": "deepseek-v4-flash",
+  "complete_stream_attempts": {
+    "smoke": 3,
+    "1_users": 8,
+    "2_users": 15,
+    "4_users_trial_a": 23,
+    "4_users_trial_b": 21,
+    "8_users": 60
+  },
+  "complete_stream_failures": {
+    "smoke": 0,
+    "1_users": 0,
+    "2_users": 0,
+    "4_users_trial_a": 0,
+    "4_users_trial_b": 0,
+    "8_users": 18
+  },
+  "stages": [
+    {
+      "users": 1,
+      "attempts": 8,
+      "failures": 0,
+      "failure_rate_pct": 0.0,
+      "full_stream_latency_ms": {"p50": 7900, "p95": 11000, "max": 11000},
+      "ttft_successful_samples": 7,
+      "ttft_ms": {"p50": 3500, "p95": 4900, "max": 4900}
+    },
+    {
+      "users": 2,
+      "attempts": 15,
+      "failures": 0,
+      "failure_rate_pct": 0.0,
+      "full_stream_latency_ms": {"p50": 7400, "p95": 13000, "max": 13000},
+      "ttft_successful_samples": 13,
+      "ttft_ms": {"p50": 3300, "p95": 7400, "max": 7400}
+    },
+    {
+      "users": 4,
+      "trial": "a",
+      "attempts": 23,
+      "failures": 0,
+      "failure_rate_pct": 0.0,
+      "full_stream_latency_ms": {"p50": 8900, "p95": 21000, "max": 23000},
+      "ttft_successful_samples": 19,
+      "ttft_ms": {"p50": 3500, "p95": 9000, "max": 9000}
+    },
+    {
+      "users": 4,
+      "trial": "b",
+      "attempts": 21,
+      "failures": 0,
+      "failure_rate_pct": 0.0,
+      "full_stream_latency_ms": {"p50": 9800, "p95": 13000, "max": 35000},
+      "ttft_successful_samples": 20,
+      "ttft_ms": {"p50": 4600, "p95": 6700, "max": 7200}
+    },
+    {
+      "users": 8,
+      "attempts": 60,
+      "failures": 18,
+      "successful_streams": 42,
+      "failure_rate_pct": 30.0,
+      "full_stream_latency_ms": {"p50": 5600, "p95": 17000, "max": 48000},
+      "ttft_successful_samples": 36,
+      "ttft_ms": {"p50": 5000, "p95": 11000, "max": 46000},
+      "failure_signature": "metadata=True, token=False, done=True, error=True"
+    }
+  ],
+  "four_user_combined": {
+    "attempts": 44,
+    "failures": 0,
+    "failure_rate_pct": 0.0
+  },
+  "process_snapshot_after_run": {
+    "working_set_mb": 379.91,
+    "private_memory_mb": 735.17,
+    "cpu_seconds": 28.2,
+    "note": "single end-of-run snapshot; not peak"
+  },
+  "comparison_to_alibaba_run": {
+    "alibaba_run_id": "sse-chat-load-2026-08-06",
+    "failure_rate_pct_by_stage": {
+      "1_users": {"deepseek": 0.0, "alibaba": 0.0},
+      "2_users": {"deepseek": 0.0, "alibaba": 0.0},
+      "4_users_trial_a": {"deepseek": 0.0, "alibaba": 11.11},
+      "4_users_trial_b": {"deepseek": 0.0, "alibaba": 0.0},
+      "8_users": {"deepseek": 30.0, "alibaba": 78.57}
+    }
+  },
+  "resume_ready": false
+}

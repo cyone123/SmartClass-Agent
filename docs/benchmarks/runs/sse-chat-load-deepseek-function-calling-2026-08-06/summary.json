@@ -1,0 +1,98 @@
+{
+  "schema_version": "1.0",
+  "benchmark": "sse-chat-load",
+  "status": "exploratory",
+  "primary_model_provider": "deepseek",
+  "primary_model": "deepseek-v4-flash",
+  "structured_method": "function_calling",
+  "structured_strict": "omitted-for-deepseek",
+  "thinking": "disabled-for-structured-models",
+  "complete_stream_attempts": {
+    "smoke": 5,
+    "1_users": 7,
+    "2_users": 18,
+    "4_users_trial_a": 33,
+    "4_users_trial_b": 35,
+    "8_users": 68
+  },
+  "complete_stream_failures": {
+    "smoke": 0,
+    "1_users": 0,
+    "2_users": 0,
+    "4_users_trial_a": 0,
+    "4_users_trial_b": 0,
+    "8_users": 0
+  },
+  "stages": [
+    {
+      "users": 1,
+      "attempts": 7,
+      "failures": 0,
+      "failure_rate_pct": 0.0,
+      "full_stream_latency_ms": {"p50": 8300, "p95": 12000, "max": 12000},
+      "ttft_successful_samples": 7,
+      "ttft_ms": {"p50": 2200, "p95": 4800, "max": 4800}
+    },
+    {
+      "users": 2,
+      "attempts": 18,
+      "failures": 0,
+      "failure_rate_pct": 0.0,
+      "full_stream_latency_ms": {"p50": 5900, "p95": 12000, "max": 12000},
+      "ttft_successful_samples": 18,
+      "ttft_ms": {"p50": 1800, "p95": 2500, "max": 2500}
+    },
+    {
+      "users": 4,
+      "trial": "a",
+      "attempts": 33,
+      "failures": 0,
+      "failure_rate_pct": 0.0,
+      "full_stream_latency_ms": {"p50": 7200, "p95": 11000, "max": 12000},
+      "ttft_successful_samples": 32,
+      "ttft_ms": {"p50": 1800, "p95": 3100, "max": 3500}
+    },
+    {
+      "users": 4,
+      "trial": "b",
+      "attempts": 35,
+      "failures": 0,
+      "failure_rate_pct": 0.0,
+      "full_stream_latency_ms": {"p50": 6900, "p95": 11000, "max": 11000},
+      "ttft_successful_samples": 33,
+      "ttft_ms": {"p50": 1900, "p95": 2600, "max": 3300}
+    },
+    {
+      "users": 8,
+      "attempts": 68,
+      "failures": 0,
+      "successful_streams": 68,
+      "failure_rate_pct": 0.0,
+      "full_stream_latency_ms": {"p50": 6700, "p95": 10000, "max": 13000},
+      "ttft_successful_samples": 67,
+      "ttft_ms": {"p50": 1900, "p95": 2700, "max": 3200}
+    }
+  ],
+  "four_user_combined": {
+    "attempts": 68,
+    "failures": 0,
+    "failure_rate_pct": 0.0
+  },
+  "process_snapshot_after_run": {
+    "working_set_mb": 373.95,
+    "private_memory_mb": 729.41,
+    "cpu_seconds": 30.03,
+    "note": "single end-of-run snapshot; not peak"
+  },
+  "comparison_to_previous_deepseek_json_schema_run": {
+    "previous_run_id": "sse-chat-load-deepseek-2026-08-06",
+    "failure_rate_pct_by_stage": {
+      "1_users": {"function_calling": 0.0, "json_schema": 0.0},
+      "2_users": {"function_calling": 0.0, "json_schema": 0.0},
+      "4_users_trial_a": {"function_calling": 0.0, "json_schema": 0.0},
+      "4_users_trial_b": {"function_calling": 0.0, "json_schema": 0.0},
+      "8_users": {"function_calling": 0.0, "json_schema": 30.0}
+    }
+  },
+  "resume_ready": false
+}

@@ -19,3 +19,6 @@ __pycache__/
 .vscode/
 .idea/
 .codex/
+
+# Local benchmark raw runs; promote only sanitized aggregates to docs/benchmarks/baselines/
+docs/benchmarks/raw/

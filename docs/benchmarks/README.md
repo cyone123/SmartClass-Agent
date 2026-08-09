@@ -49,6 +49,59 @@ python -m tests.benchmarks.context_compression_ab `
 该脚本使用固定合成长对话，A 组关闭压缩，B 组调用真实压缩模型；晋升时只写入聚合结果，
 原始逐次报告仍保存在 `backend/tests/evals/results/`。
 
+## 阶段 4：非 RAG SSE 压测
+
+`backend/tests/benchmarks/sse_load.py` 使用 Locust 访问认证后的 `/api/chat/stream`，
+固定普通聊天提示词，不进入教学设计、RAG 或产物分支。每次请求必须收到
+`metadata`、至少一个 `token` 和最终 `done`；不完整或出现 `error` 的流计为失败。
+脚本同时记录完整 SSE 请求耗时和 TTFT（首个 token 延迟），认证请求标记为 `[setup]`，
+不混入正式指标。
+
+建议先以单用户 smoke，再按阶梯并发执行；`--csv` 是 Locust 原始汇总，
+`SMARTCLASS_BENCHMARK_OUTPUT` 保存脱敏 JSON 汇总：
+
+```powershell
+cd backend
+$env:PYTHONUTF8 = "1"
+$env:SMARTCLASS_BENCHMARK_TOKEN = "<short-lived-token>"
+$env:SMARTCLASS_BENCHMARK_OUTPUT = "..\\docs\\benchmarks\\raw\\sse-smoke.json"
+python -m locust -f tests/benchmarks/sse_load.py `
+  --headless --host http://127.0.0.1:8000 `
+  -u 1 -r 1 --run-time 30s --csv ..\\docs\\benchmarks\\raw\\sse-smoke
+```
+
+正式压测应至少拆为 Mock LLM 与真实 LLM 两种模式。Mock 模式用于测服务自身容量，
+真实 LLM 模式用于测用户可见 TTFT；两者不得合并统计。报告至少包含并发数、持续时间、
+请求数、完整率、错误率、TTFT p50/p95、完整请求耗时 p50/p95，以及运行环境和模型信息。
+该实验不测 RAG 检索质量或 RAG 延迟。若需要定位 SSE `error` 原因，脚本会在聚合 JSON
+中写入脱敏后的 `error_reasons`（分类、错误类型和短消息），并在 Locust failure CSV
+中追加低基数分类；不持久化原始错误正文、凭据或 URL 查询参数。
+
+未通过稳定性门禁的阶段 4 探索性运行放在 `docs/benchmarks/runs/`，不放入
+`baselines/`，也不能直接用于简历。只有完成多轮重复、错误归因和资源采样后，
+才可将聚合报告晋升为正式 baseline。
+
+本次正式矩阵使用 `tests/benchmarks/run_sse_matrix.ps1`，每个窗口由
+`resource_sampler.ps1` 以 1 秒间隔采集后端进程工作集、私有内存、CPU、线程和句柄，
+并由 `aggregate_sse_matrix.py` 汇总 Mock/真实模型对照结果。续跑指定轮次时使用
+`-StartRound`，避免覆盖已落盘窗口：
+
+```powershell
+pwsh -File tests/benchmarks/run_sse_matrix.ps1 `
+  -BackendPid <pid> -Mode mock `
+  -OutputRoot ../docs/benchmarks/raw/sse-formal-mock-YYYYMMDD `
+  -DurationSeconds 300 -Rounds 3
+
+python tests/benchmarks/aggregate_sse_matrix.py `
+  --input-root mock=../docs/benchmarks/raw/sse-formal-mock-YYYYMMDD `
+  --input-root live=../docs/benchmarks/raw/sse-formal-deepseek-YYYYMMDD `
+  --output-dir ../docs/benchmarks/runs/sse-chat-load-formal-YYYY-MM-DD `
+  --rounds 3
+```
+
+若真实模型窗口出现上游超时，报告保留失败请求与脱敏后的 `error_reasons`，稳定性门禁应为
+`FAIL`，简历只能按实际成功率和错误归因描述，不能宣称全量 100% 通过。
+
 产物生成实验使用 5 个固定跨学科合成场景，每个场景重复 2 次，并在真实生产链路中并行生成
 PPTX、DOCX 与单文件 HTML，共 30 个正式样本：
 
