@@ -106,6 +106,7 @@ graph LR
 - **框架**：FastAPI + Uvicorn
 - **Agent**：LangChain + LangGraph
 - **数据库**：PostgreSQL + PGVector
+- **运行事件**：Redis Streams（断线重连、游标回放、实时输出快照）
 - **存储**：Local / MinIO 对象存储
 - **认证**：JWT Bearer
 - **可观测**：OpenTelemetry + Prometheus
@@ -146,8 +147,8 @@ graph LR
 │  └──────────────────────────────────────────────────┘  │
 │                                                          │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐ │
-│  │  PostgreSQL  │  │   PGVector   │  │  LangGraph   │ │
-│  │  (业务数据)  │  │  (向量索引)  │  │  Store       │ │
+│  │  PostgreSQL  │  │ Redis Streams│  │  LangGraph   │ │
+│  │(生命周期快照)│  │ (运行事件)   │  │  Store       │ │
 │  └──────────────┘  └──────────────┘  └──────────────┘ │
 │                                                          │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐ │
@@ -164,6 +165,7 @@ graph LR
 | **认证权限** | `app/core/auth.py` | JWT 认证、密码哈希、用户归属校验 |
 | **存储服务** | `app/core/storage.py` | 统一存储抽象，支持 Local/MinIO |
 | **对话流程** | `app/core/graph.py` | LangGraph 主流程，60+ KB |
+| **运行事件** | `app/core/chat_run_events.py` | Redis Streams 发布、回放、快照与保留策略 |
 | **Agent Runtime** | `app/core/agent.py` | Agent 执行、工具集成，91 KB |
 | **长期记忆** | `app/core/memory.py` | Profile/Experience 记忆管理 |
 | **RAG 检索** | `app/core/rag.py` | 向量检索、文档分块 |
@@ -179,6 +181,7 @@ graph LR
 - **Python** 3.11+
 - **Node.js** 20.19+ 或 22.12+
 - **PostgreSQL** 14+（已安装 PGVector 扩展）
+- **Redis** 7.4+（必须启用 AOF，并使用 `noeviction`）
 - **可选**：MinIO（对象存储）、Prometheus（指标监控）
 
 ### 1. 克隆仓库
@@ -218,6 +221,9 @@ cp .env.local.example .env
 ```env
 # 数据库
 DATABASE_URL=postgresql://user:password@localhost:5432/smartclass
+
+# 持久对话 Run 的实时事件存储（必需）
+REDIS_URL=redis://localhost:6379/0
 
 # LLM API (OpenAI 兼容)
 MODEL=your-model-name
@@ -312,7 +318,7 @@ docker compose --env-file .env.docker down
 ```
 
 **服务访问：**
-- 前端：`http://localhost:5173`
+- 前端：`http://localhost:8080`
 - 后端：`http://localhost:8000`
 - Prometheus：`http://localhost:9090`
 - MinIO：`http://localhost:9000`

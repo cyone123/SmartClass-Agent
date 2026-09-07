@@ -75,7 +75,7 @@ function Wait-Http {
     while ((Get-Date) -lt $deadline) {
         try {
             $response = Invoke-WebRequest -UseBasicParsing -Uri $Url -TimeoutSec 5
-            if ($response.StatusCode -ge 200 -and $response.StatusCode -lt 500) {
+            if ($response.StatusCode -ge 200 -and $response.StatusCode -lt 300) {
                 return $response
             }
         }
@@ -117,9 +117,36 @@ if (-not $SkipStart) {
     Invoke-Compose @("up", "-d")
 }
 
-Write-Step "Checking backend health"
-$backendHealth = Wait-Http -Url "http://localhost:$backendPort/health" -TimeoutSeconds 180
+Write-Step "Checking backend readiness (including Redis)"
+$backendHealth = Wait-Http -Url "http://localhost:$backendPort/ready" -TimeoutSeconds 180
 Write-Host $backendHealth.Content
+
+Write-Step "Checking Redis AOF, non-eviction, and restart recovery"
+$redisConfig = Invoke-Compose @("exec", "-T", "redis", "redis-cli", "CONFIG", "GET", "appendonly", "appendfsync", "maxmemory-policy", "maxmemory")
+$redisConfigText = ($redisConfig -join "`n")
+if ($redisConfigText -notmatch "appendonly" -or $redisConfigText -notmatch "yes" -or $redisConfigText -notmatch "noeviction") {
+    throw "Redis persistence or memory policy does not match the supported deployment."
+}
+$redisProbeKey = "smartclass:verify:aof:$([Guid]::NewGuid().ToString('N'))"
+Invoke-Compose @("exec", "-T", "redis", "redis-cli", "SET", $redisProbeKey, "retained")
+Start-Sleep -Seconds 2
+Invoke-Compose @("restart", "redis")
+$redisDeadline = (Get-Date).AddSeconds(60)
+do {
+    try {
+        $redisValue = Invoke-Compose @("exec", "-T", "redis", "redis-cli", "GET", $redisProbeKey)
+        if (($redisValue -join "").Trim() -eq "retained") {
+            break
+        }
+    }
+    catch {
+        Start-Sleep -Seconds 2
+    }
+} while ((Get-Date) -lt $redisDeadline)
+if (($redisValue -join "").Trim() -ne "retained") {
+    throw "Redis AOF probe was not recovered after restart."
+}
+Invoke-Compose @("exec", "-T", "redis", "redis-cli", "DEL", $redisProbeKey)
 
 Write-Step "Checking frontend health"
 $frontendHealth = Wait-Http -Url "http://localhost:$frontendPort/healthz" -TimeoutSeconds 120

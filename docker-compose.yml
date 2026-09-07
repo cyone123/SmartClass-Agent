@@ -23,6 +23,7 @@ services:
         required: false
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-smartclass}:${POSTGRES_PASSWORD:-smartclass_dev_password}@postgres:5432/${POSTGRES_DB:-smartclass}
+      REDIS_URL: redis://redis:6379/0
       FILE_STORAGE_ROOT: /app/storage
       SKILLS_ROOT: /app/skills
       VIDEO_FFMPEG_BIN: ffmpeg
@@ -38,6 +39,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      redis:
+        condition: service_healthy
       minio:
         condition: service_started
       minio-init:
@@ -49,7 +52,7 @@ services:
     ports:
       - "${DEBUG_BIND:-127.0.0.1}:${BACKEND_PORT:-8000}:8000"
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3).read()"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/ready', timeout=3).read()"]
       interval: 30s
       timeout: 5s
       retries: 5
@@ -74,6 +77,29 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
+    networks:
+      - smartclass
+    restart: unless-stopped
+
+  redis:
+    image: redis:7.4.5-alpine
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --appendfsync
+      - everysec
+      - --maxmemory-policy
+      - noeviction
+      - --maxmemory
+      - ${REDIS_MAXMEMORY:-512mb}
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
     networks:
       - smartclass
     restart: unless-stopped
@@ -178,6 +204,7 @@ networks:
 
 volumes:
   postgres_data:
+  redis_data:
   minio_data:
   backend_storage:
   grafana_data:

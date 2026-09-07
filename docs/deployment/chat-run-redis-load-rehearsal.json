@@ -1,0 +1,27 @@
+{
+  "schema_version": "1.0",
+  "benchmark": "redis-chat-run-load",
+  "run_mode": "live-http-sse",
+  "timestamp": "2026-09-07T12:38:15.225518+00:00",
+  "metrics": {
+    "runs": 2,
+    "events_per_run": 5.0,
+    "sse_connection_count": 4,
+    "replay_latency_ms": {
+      "p50": 8.58,
+      "p95": 12.28
+    },
+    "redis_operations": 51,
+    "redis_operation_avg_latency_ms": 616.973,
+    "token_batching_ratio": null,
+    "retained_memory_bytes_per_run": 4912,
+    "postgres_event_statements_observed": 0,
+    "postgres_event_transactions_observed": 0,
+    "postgres_event_transactions_avoided_estimate": 10,
+    "measurement_notes": {
+      "postgres_avoided_estimate": "Legacy transport used at least one event transaction per emitted event.",
+      "null_redis_metrics": "Enable PROMETHEUS_ENABLED for operation metrics; the Redis URL enables memory sampling only.",
+      "null_token_batching_ratio": "A null ratio means the measured Runs emitted no token fragments/appends."
+    }
+  }
+}

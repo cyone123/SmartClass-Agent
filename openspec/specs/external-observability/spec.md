@@ -48,11 +48,11 @@ The system SHALL export traces for HTTP requests and SmartClass Agent workflow o
 
 ### Requirement: Prometheus metrics export
 
-The system SHALL expose low-cardinality Prometheus metrics for SmartClass system health, Agent behavior, and long-running workflow outcomes.
+The system SHALL expose low-cardinality Prometheus metrics for SmartClass system health, Agent behavior, durable run activity, subscription activity, and long-running workflow outcomes.
 
 #### Scenario: Agent and system observations are recorded
 
-- **WHEN** SmartClass records observations for chat runs, LLM calls, tool calls, RAG retrieval, file ingestion, artifact generation, workspace code execution, or storage operations
+- **WHEN** SmartClass records observations for chat runs, SSE subscriptions, LLM calls, tool calls, RAG retrieval, file ingestion, artifact generation, workspace code execution, or storage operations
 - **THEN** Prometheus metrics MUST update counters, histograms, or gauges with bounded labels suitable for aggregation and alerting
 
 #### Scenario: Metric labels are generated
@@ -65,10 +65,15 @@ The system SHALL expose low-cardinality Prometheus metrics for SmartClass system
 - **WHEN** an LLM observation includes token usage metadata
 - **THEN** Prometheus metrics MUST record input, output, and total token counts using bounded labels such as model and token type
 
-#### Scenario: Active chat runs change
+#### Scenario: Active durable chat runs change
 
-- **WHEN** a chat stream run starts, completes, or fails
-- **THEN** Prometheus metrics MUST expose an active run gauge or equivalent metric that reflects current backend run activity
+- **WHEN** a durable chat run starts, waits for approval, completes, fails, or is cancelled
+- **THEN** Prometheus metrics MUST expose an active run gauge or equivalent metric that reflects Agent execution independently from the number of SSE subscribers
+
+#### Scenario: Run-event subscriptions change
+
+- **WHEN** an SSE replay subscription opens, reconnects, completes, or disconnects
+- **THEN** subscription observations MUST remain distinct from durable Agent run outcome observations
 
 ### Requirement: Exporter failure isolation
 
