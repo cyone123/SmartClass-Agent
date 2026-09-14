@@ -2,7 +2,7 @@
 
 ## 项目概览
 
-SmartClass Agent：面向教师的多模态教学智能体。后端用 LangGraph 编排「意图识别 → 记忆加载 → 教学要素抽取 → RAG 检索 → 教学设计 → 产物生成/修改」主流程，产出 PPTX / DOCX / 单文件 HTML 互动内容；前端是 Vue 3 三栏工作台，通过 SSE 消费流式事件。
+SmartClass Agent：面向教师的多模态教学智能体。后端用 LangGraph 编排「记忆加载 → 意图识别 → 教学要素抽取 → RAG 检索 → 教学设计 → 产物生成/修改」主流程，产出 PPTX / DOCX / 单文件 HTML 互动内容；前端是 Vue 3 三栏工作台，通过 SSE 消费流式事件。
 
 **本仓库是 super-repo，`backend/`、`frontend/`、`landing-page/` 都是 git 子模块。** 改动子模块内代码要先在子模块目录里提交，再回根仓库提交指针更新；`git status` 在根目录只会显示子模块的 dirty 状态。克隆用 `git clone --recurse-submodules`，已克隆则 `git submodule update --init --recursive`。
 
@@ -61,7 +61,7 @@ cp .env.docker.example .env.docker
 docker compose --env-file .env.docker up -d --build
 ```
 
-服务：frontend / backend / postgres(pgvector) / minio / minio-init / onlyoffice / otel-collector / prometheus / grafana。
+服务：frontend / backend / postgres(pgvector) / redis / minio / minio-init / onlyoffice / otel-collector / prometheus / grafana。
 
 ## 架构要点
 
@@ -71,8 +71,6 @@ docker compose --env-file .env.docker up -d --build
 
 `app/core/llm.py` 按用途拆了多个 OpenAI 兼容模型角色，各自独立配 `MODEL/API_KEY/BASE_URL`：主对话（`MODEL`，streaming）、结构化输出（`STRUCTED_*`）、小模型（`SMALL_*`）、结构化快模型（`STRUCTURED_FAST_*`）、记忆（`MEMORY_*`）、上下文压缩（`CONTEXT_COMPRESSION_*`）、语音（`STT_*`）、视频视觉（`VIDEO_VISION_*`）、向量（`EMBEDDINGS_*`）。未配置的角色会按固定链路回退到上一级。
 
-⚠️ **`STRUCTED_MDOEL`、`STRUCTED_API_KEY`、`STRUCTED_BASE_URL`、`SMALL_MDOEL` 这几个拼写错误是既成事实**，代码、`.env`、conftest、CI secrets 全部依赖它，**不要顺手"修正"拼写**。
-
 DeepSeek 兼容接口在结构化输出（tool calling）时会被自动关闭 thinking；`MODEL_THINKING_MODE` 只接受 `enabled` / `disabled`，且会被写进 benchmark 报告元数据，不同 thinking 状态的结果不能合并统计。
 
 ### LangGraph 主流程（`app/core/graph.py`，约 60KB）
@@ -81,22 +79,18 @@ DeepSeek 兼容接口在结构化输出（tool calling）时会被自动关闭 t
 
 ```
 START → profile_memory_load_node → intent_router_node
-  ├─ 普通聊天:   normal_chat_memory_retrieval_node → normal_chat_node
-  ├─ 教学规划:   teaching_plan/design_memory_retrieval → metadata_structer_node
-  │              → follow_up_questioner | metadata_review_interrupt
-  │              → rag_retrieval_node → teaching_design_planner
-  │              → teaching_plan_review_interrupt → ppt/docx/html_game_generate_node
-  └─ 产物修改:   artifact_revision_memory_retrieval → artifact_revision_clarification
-                 → ppt/docx/html_game_revision_node
-产物节点 → artifact_fan_in_node → profile_memory_reflection_node
-         → experience_memory_reflection_node → END
+  ├─ 普通聊天: normal_chat_node
+  ├─ 教学规划: metadata_structer_node → 补充/确认 → RAG → teaching_design_planner
+  │            → 教学计划确认 → ppt/docx/html_game_generate_node
+  └─ 产物修改: artifact_revision_router_node → 澄清/准备 → ppt/docx/html_game_revision_node
+产物节点 → artifact_fan_in_node → END
 ```
 
-三种产物节点并行 fan-out、`artifact_fan_in_node` 汇聚。审批用 LangGraph `interrupt()` 实现（教学要素确认、教学计划确认、产物修改目标澄清），恢复靠 checkpointer；**新增自动化能力不要绕过这些确认节点**。图状态定义在 `app/core/state.py` 的 `TeachingAssistantState`。
+三种产物节点并行 fan-out、`artifact_fan_in_node` 汇聚。审批用 LangGraph `interrupt()` 实现（教学要素确认、教学计划确认、产物修改目标澄清），恢复靠 checkpointer；**新增自动化能力不要绕过这些确认节点**。长期记忆反思已移出图，由后台 worker 处理。图状态定义在 `app/core/state.py` 的 `TeachingAssistantState`。
 
 ### Agent Runtime（`app/core/agent.py`，约 97KB）
 
-`AgentRuntime` 是产物子 Agent 的执行器，装了三个 middleware：`SkillPromptMiddleware`（按 progressive disclosure 注入 skill 说明）、`SkillExecutionPolicyMiddleware`（部分工具必须由 active skill 授权才能调用）、`LLMObservationMiddleware`（token usage 与错误分类）。Skill 定义在 `backend/skills/<name>/SKILL.md`（frontmatter + 正文 + `scripts/`/`references/`），由 `app/core/skills.py` 的 `SkillRegistry` 加载。
+`AgentRuntime` 是产物子 Agent 的执行器。核心 middleware 负责 skill 提示与授权、动态 system prompt、工具重试和 LLM 观测；任务级 Profile/Experience 在 Agent 启动时一次性注入，不在每轮模型调用中检索。Skill 定义在 `backend/skills/<name>/SKILL.md`，由 `app/core/skills.py` 的 `SkillRegistry` 加载。
 
 **Skill 的文档风格借鉴 Anthropic progressive disclosure，但运行时是 OpenAI 兼容接口，不是 Anthropic SDK。**
 
@@ -118,11 +112,13 @@ START → profile_memory_load_node → intent_router_node
 
 ### 长期记忆（`app/core/memory.py`）
 
-按用户命名空间隔离：`("users", user_id, "profile")` 与 `("users", user_id, "experiences")`。profile 存稳定画像/偏好，experience 存可复用教学经验（最多从 100 条摘要中选 3 条注入）。记忆内容要摘要化、最小化，**不保存完整隐私上下文**；显式用户指令优先级高于记忆。用户可通过 `/api/memory` 自行 CRUD。
+按用户命名空间隔离：`("users", user_id, "profile")` 与 `("users", user_id, "experiences")`。Profile 每次会话加载一次；Experience 由业务调用按语义检索，并以任务级快照在规划、审批恢复和并行产物间共享，不再使用固定检索节点。会话结束后只登记反思任务，由单个后台 `MemoryReflectionWorker` 异步写入；进程崩溃时运行中的任务可失败，不使用租约。记忆必须摘要化、最小化，显式用户指令优先；用户可通过 `/api/memory` CRUD。
 
 ### SSE 事件契约（`app/api/chat.py`）
 
-`/api/chat/stream` 只透传这些事件：`metadata`（含 `run_id`/`thread_id`）、`token`、`progress`、`artifact`、`artifact_trace`、`approval`、`suggestions`、`error`，流末固定发 `done`（data 为 `[DONE]`）。新增事件类型要同时改后端白名单和前端消费逻辑。
+持久运行接口先由 `/api/chat/runs` 创建后台任务，再通过 `/api/chat/runs/{run_id}/events` 从 Redis 顺序读取/续传 SSE；任务执行不依赖客户端连接，断线重连不会取消任务。PostgreSQL 保存运行状态，Redis 保存流式事件与短期输出，Redis 不可用时服务 readiness 失败。兼容接口 `/api/chat/stream` 仍保留。
+
+事件类型为 `metadata`、`token`、`progress`、`artifact`、`artifact_trace`、`approval`、`suggestions`、`error`、`done`。新增类型要同步修改后端白名单、Redis 事件层和前端消费逻辑。
 
 ### 可观测性（`app/core/observability.py`）
 
