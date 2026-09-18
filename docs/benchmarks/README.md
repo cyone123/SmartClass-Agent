@@ -49,6 +49,14 @@ python -m tests.benchmarks.context_compression_ab `
 该脚本使用固定合成长对话，A 组关闭压缩，B 组调用真实压缩模型；晋升时只写入聚合结果，
 原始逐次报告仍保存在 `backend/tests/evals/results/`。
 
+主 LangGraph 简化的确定性调用深度与可见里程碑延迟代理使用：
+
+```powershell
+python -m tests.benchmarks.main_graph_orchestration_ab --repeats 20 --delay-ms 10
+```
+
+该命令分别报告普通对话、需要 Experience 的普通对话、首次不完整教学请求、后续追问轮次和完整请求，不能把等调用深度场景混入“平均降幅”。它是固定延迟的编排代理，不等同于真实模型 TTFT；结果示例见 `runs/main-graph-simplification-2026-09-14/`。
+
 ## 阶段 4：非 RAG SSE 压测
 
 `backend/tests/benchmarks/sse_load.py` 使用 Locust 访问认证后的 `/api/chat/stream`，

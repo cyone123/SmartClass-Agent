@@ -1,0 +1,49 @@
+{
+  "schema_version": "1.0",
+  "run_mode": "deterministic",
+  "measurement": "controlled-delay orchestration proxy",
+  "repeats": 20,
+  "delay_per_model_call_ms": 10.0,
+  "environment": {
+    "os": "Windows",
+    "python": "3.13.0"
+  },
+  "scenarios": [
+    {
+      "scenario": "ordinary_chat",
+      "legacy": {"model_calls": 2, "first_token_latency_ms": 31.339},
+      "simplified": {"model_calls": 1, "first_token_latency_ms": 15.694},
+      "model_call_reduction": 1,
+      "latency_proxy_reduction_percent": 49.92
+    },
+    {
+      "scenario": "memory_assisted_chat",
+      "legacy": {"model_calls": 2, "first_token_latency_ms": 30.982},
+      "simplified": {"model_calls": 2, "first_token_latency_ms": 31.22},
+      "model_call_reduction": 0,
+      "latency_proxy_reduction_percent": -0.77
+    },
+    {
+      "scenario": "first_incomplete_teaching_request",
+      "legacy": {"model_calls": 3, "clarification_latency_ms": 46.67},
+      "simplified": {"model_calls": 2, "clarification_latency_ms": 31.359},
+      "model_call_reduction": 1,
+      "latency_proxy_reduction_percent": 32.81
+    },
+    {
+      "scenario": "clarification_turn",
+      "legacy": {"model_calls": 2, "clarification_latency_ms": 31.038},
+      "simplified": {"model_calls": 1, "clarification_latency_ms": 15.716},
+      "model_call_reduction": 1,
+      "latency_proxy_reduction_percent": 49.36
+    },
+    {
+      "scenario": "complete_teaching_request",
+      "legacy": {"model_calls": 2, "approval_latency_ms": 31.092},
+      "simplified": {"model_calls": 2, "approval_latency_ms": 31.16},
+      "model_call_reduction": 0,
+      "latency_proxy_reduction_percent": -0.22
+    }
+  ],
+  "limitations": "This deterministic proxy measures orchestration model-call depth under a fixed async delay; it is not production provider latency and contains no raw prompts or responses."
+}
