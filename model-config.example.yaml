@@ -1,0 +1,26 @@
+# MODEL_CONFIG_PATH=model-config.example.yaml (relative to repository root).
+# Loading is offline. Supply API_KEY only at startup/invocation. Restart to reload.
+version: 1
+connections:
+  primary:
+    preset: openai
+    protocol: openai_chat
+    credential: env:API_KEY
+models:
+  teaching:
+    connection: primary
+    model_id: gpt-4o-mini
+    capabilities:
+      text: true
+      tools: true
+      tool_choice: true
+      streaming: true
+      source: declared
+roles:
+  main: {model: teaching}
+  structured: {inherit: main}
+  small: {inherit: main}
+  structured_fast: {inherit: structured}
+  memory: {inherit: structured_fast}
+  compression: {enabled: false}
+  video_vision: {enabled: false}
