@@ -29,16 +29,16 @@
 
 依赖阶段 2。对应 multi-protocol-model-runtime 和 context-compression；优先用脱敏 fixture 完成契约，再执行真实 smoke。
 
-- [ ] 3.1 选择并固定兼容的 LangChain/Anthropic/Google GenAI 集成版本；验证依赖解析、Windows import、现有 create_agent/middleware 接口和开发/容器安装方式。
-- [ ] 3.2 实现 anthropic_messages 适配器与 Anthropic 基础预设；使用协议 fixture 验证 system 顺序、认证引用、流式、工具往返、结构化方法及模型适用的 thinking 参数映射。
-- [ ] 3.3 实现 google_genai 适配器与 Gemini Developer API 预设；验证显式 Developer API 选择、文本/图片输入、流式、工具往返与结构化策略，宿主机 Vertex 环境变量不得改变目标。
-- [ ] 3.4 统一角色必需能力和结构化策略校验，保留现有 action/记忆工具 schema；验证 required 字段、枚举/嵌套参数、非法 JSON、截断及不支持 forced tool 的组合不被无声降级。
-- [ ] 3.5 统一展示文本提取和流增量处理，迁移主图、Agent、session 展示及视觉输出中的有损转换；验证 text/reasoning/tool 混合块、空文本结束块和原 SSE 契约，禁止内部字段泄漏到 token/artifact_trace。
-- [ ] 3.6 保留工具调用标识、原生 reasoning/signature 元数据，修正历史过滤与截断边界；以三协议 fixture 验证 stream 合并 → checkpoint 序列化/恢复 → 第二轮请求，以及并行工具结果关联。
-- [ ] 3.7 实现完整回合边界上的跨协议历史准备与 system/记忆边界处理；验证已完成历史可移植、未完成工具交换拒绝切换、不伪造签名且不将非可信记忆提升为指令。
-- [ ] 3.8 调整压缩边界和摘要输入过滤；验证保留区原生元数据不变、工具交换不被切断、私有 reasoning/signature 不进入摘要提示、审批期间不压缩和失败保留历史。
-- [ ] 3.9 统一错误分类与 SDK/运行时总重试预算；覆盖认证/能力错误、Retry-After、超时、取消、断流和结构校验 fallback，证明已输出文本或执行工具后不会重跑整个 Agent。
-- [ ] 3.10 扩展 usage 归一化与错误脱敏；验证三协议的 input/output/total、usage 不可用、缓存/推理明细缺失，以及 exporter 关闭时正常工作和低基数 label 约束。
+- [x] 3.1 选择并固定兼容的 LangChain/Anthropic/Google GenAI 集成版本；验证依赖解析、Windows import、现有 create_agent/middleware 接口和开发/容器安装方式。
+- [x] 3.2 实现 anthropic_messages 适配器与 Anthropic 基础预设；使用协议 fixture 验证 system 顺序、认证引用、流式、工具往返、结构化方法及模型适用的 thinking 参数映射。
+- [x] 3.3 实现 google_genai 适配器与 Gemini Developer API 预设；验证显式 Developer API 选择、文本/图片输入、流式、工具往返与结构化策略，宿主机 Vertex 环境变量不得改变目标。
+- [x] 3.4 统一角色必需能力和结构化策略校验，保留现有 action/记忆工具 schema；验证 required 字段、枚举/嵌套参数、非法 JSON、截断及不支持 forced tool 的组合不被无声降级。
+- [x] 3.5 统一展示文本提取和流增量处理，迁移主图、Agent、session 展示及视觉输出中的有损转换；验证 text/reasoning/tool 混合块、空文本结束块和原 SSE 契约，禁止内部字段泄漏到 token/artifact_trace。
+- [x] 3.6 保留工具调用标识、原生 reasoning/signature 元数据，修正历史过滤与截断边界；以三协议 fixture 验证 stream 合并 → checkpoint 序列化/恢复 → 第二轮请求，以及并行工具结果关联。
+- [x] 3.7 实现完整回合边界上的跨协议历史准备与 system/记忆边界处理；验证已完成历史可移植、未完成工具交换拒绝切换、不伪造签名且不将非可信记忆提升为指令。
+- [x] 3.8 调整压缩边界和摘要输入过滤；验证保留区原生元数据不变、工具交换不被切断、私有 reasoning/signature 不进入摘要提示、审批期间不压缩和失败保留历史。
+- [x] 3.9 统一错误分类与 SDK/运行时总重试预算；覆盖认证/能力错误、Retry-After、超时、取消、断流和结构校验 fallback，证明已输出文本或执行工具后不会重跑整个 Agent。
+- [x] 3.10 扩展 usage 归一化与错误脱敏；验证三协议的 input/output/total、usage 不可用、缓存/推理明细缺失，以及 exporter 关闭时正常工作和低基数 label 约束。
 - [ ] 3.11 完成阶段 3 门禁：三协议离线契约全通过，执行显式标记的原生 Anthropic/Gemini 聊天、stream、工具闭环和已声明 structured/vision smoke；缺权限或凭据的项目记录未验证且保持本门禁未完成。
 
 ## 4. 提供商预设与兼容矩阵

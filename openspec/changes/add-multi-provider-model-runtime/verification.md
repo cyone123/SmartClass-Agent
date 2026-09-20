@@ -45,7 +45,7 @@
 
 ## 部署与运行说明
 
-- 本阶段只实现 `openai_chat`，预设为 `openai` / `custom` / `legacy`。原生 Anthropic/Gemini、其他预设和真实 smoke 留在阶段 3–5，不宣称可用。
+- 阶段 1–2 验收时只实现 `openai_chat`。阶段 3 的原生协议实现与验证结果见 [stage-3-verification.md](stage-3-verification.md)；真实 smoke 尚未通过，不能据此宣称真实提供商兼容性。
 - 已有数据库在部署本代码前执行 `python -m app.migrations.v20260919_model_config_snapshot`。迁移只添加可空 JSON 列，不回填猜测的历史配置。此次没有对现有部署数据库执行迁移。
 - `MODEL_CONFIG_PATH` 相对仓库根解析，绝对 Windows 路径也支持。配置启动加载，修改后重启生效；凭据只写环境变量，YAML 只写 `env:NAME` 引用。离线解析不要求密钥，启动校验启用的必需角色。
 - 完整 legacy 身份继续兼容；部分 model/key/endpoint 身份不再跨角色借用。仅 main/structured/small 原 SDK 的同角色 OpenAI 默认 endpoint 可补齐；memory/fast/compression/vision 专用身份要求明确 endpoint。禁用压缩/视觉不会要求专用凭据。
