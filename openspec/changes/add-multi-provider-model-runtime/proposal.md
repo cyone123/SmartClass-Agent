@@ -34,4 +34,4 @@ SmartClass 当前将聊天角色与 OpenAI Chat Completions 客户端绑定，�
 - 依赖：增加 Anthropic、Google GenAI 的 LangChain 集成，按契约验证结果决定 DeepSeek 专用集成；收敛经过验证的依赖版本。
 - 部署与证据：根目录配置示例、Compose 配置挂载、README、后端测试、评估 manifest 和 benchmark 脱敏 allowlist。
 - 前端和现有外部聊天 API 不新增配置操作或协议专用事件。embedding/STT 保持现有实现与独立边界。
-- 实施分五阶段：配置与工厂 → 入口迁移与快照 → 原生协议 → 提供商预设 → 发布验证。业务代码位于 backend 子模块，实施提交时先提交子模块，再更新根仓库指针。
+- 实施分五阶段：配置与工厂 → 入口迁移与快照 → 原生协议 → 提供商预设 → 发布验证。业务代码位于 backend 目录，实施改动在 monorepo 根仓库统一提交。

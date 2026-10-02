@@ -1,4 +1,4 @@
-name: Integration
+name: CI
 
 on:
   push:
@@ -6,44 +6,62 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   backend-unit:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    defaults:
+      run:
+        working-directory: backend
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: recursive
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: pip
-          cache-dependency-path: backend/requirements-dev.txt
+          cache-dependency-path: |
+            backend/requirements.txt
+            backend/requirements-dev.txt
       - name: Install backend development dependencies
-        run: python -m pip install -r backend/requirements-dev.txt
+        run: python -m pip install -r requirements-dev.txt
       - name: Lint backend
-        run: python -m ruff check backend/app backend/tests
+        run: python -m ruff check app tests
+      - name: Check backend formatting
+        run: python -m ruff format --check app tests
       - name: Run default backend tests
         working-directory: backend
-        run: python -m pytest -q --junitxml=backend-unit.xml
+        run: python -m pytest -q --junitxml=backend-unit.xml --cov=app --cov-report=xml --cov-report=term
       - name: Upload backend test summary
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: backend-unit-summary
-          path: backend/backend-unit.xml
+          name: backend-unit-summary-${{ matrix.os }}
+          path: |
+            backend/backend-unit.xml
+            backend/coverage.xml
           if-no-files-found: error
 
   eval-harness:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: recursive
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: pip
-          cache-dependency-path: backend/requirements-dev.txt
+          cache-dependency-path: |
+            backend/requirements.txt
+            backend/requirements-dev.txt
       - name: Install backend development dependencies
         run: python -m pip install -r backend/requirements-dev.txt
       - name: Validate all evaluation cases without a model
@@ -64,13 +82,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: recursive
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: pip
-          cache-dependency-path: backend/requirements-dev.txt
+          cache-dependency-path: |
+            backend/requirements.txt
+            backend/requirements-dev.txt
       - name: Install backend development dependencies
         run: python -m pip install -r backend/requirements-dev.txt
       - name: Verify fail-closed regression fixtures
@@ -99,8 +117,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: recursive
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
@@ -113,12 +129,27 @@ jobs:
         working-directory: frontend
         run: npm run build
 
+  landing-page-build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: landing-page
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: landing-page/package-lock.json
+      - name: Install landing page dependencies
+        run: npm ci
+      - name: Build landing page
+        run: npm run build
+
   compose-smoke:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: recursive
       - name: Validate compose config
         run: |
           cp .env.docker.example .env.docker

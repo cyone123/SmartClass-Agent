@@ -11,9 +11,7 @@
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 [![CI](https://github.com/cyone123/SmartClass-Agent/actions/workflows/integration.yml/badge.svg)](https://github.com/cyone123/SmartClass-Agent/actions/workflows/integration.yml)
-[![Backend CI](https://github.com/cyone123/SmartClass-Agent-Backend/actions/workflows/ci.yml/badge.svg)](https://github.com/cyone123/SmartClass-Agent-Backend/actions/workflows/ci.yml)
-[![Backend Eval](https://github.com/cyone123/SmartClass-Agent-Backend/actions/workflows/eval.yml/badge.svg)](https://github.com/cyone123/SmartClass-Agent-Backend/actions/workflows/eval.yml)
-[![Frontend CI](https://github.com/cyone123/SmartClass-Agent-Frontend/actions/workflows/ci.yml/badge.svg)](https://github.com/cyone123/SmartClass-Agent-Frontend/actions/workflows/ci.yml)
+[![Agent Evaluation](https://github.com/cyone123/SmartClass-Agent/actions/workflows/eval.yml/badge.svg)](https://github.com/cyone123/SmartClass-Agent/actions/workflows/eval.yml)
 
 *基于 LangGraph 的多模态教学智能体，帮助教师快速完成备课、教学设计、课件生成与互动内容创作*
 
@@ -190,15 +188,11 @@ graph LR
 ### 1. 克隆仓库
 
 ```bash
-git clone --recurse-submodules https://github.com/cyone123/SmartClass-Agent.git
+git clone https://github.com/cyone123/SmartClass-Agent.git
 cd SmartClass-Agent
 ```
 
-如果已经克隆过主仓库：
-
-```bash
-git submodule update --init --recursive
-```
+本项目使用 monorepo，三个应用目录均随主仓库一起克隆。依赖与环境变量配置仍按各应用原有方式管理。迁移与 CI 说明见 [monorepo 文档](docs/monorepo.md)。
 
 ### 2. 后端设置
 

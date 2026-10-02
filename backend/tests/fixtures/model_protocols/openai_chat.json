@@ -1,0 +1,31 @@
+{
+  "id": "offline-1",
+  "object": "chat.completion",
+  "created": 1,
+  "model": "fixture-model",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "Visible",
+        "tool_calls": [
+          {
+            "id": "call-a",
+            "type": "function",
+            "function": {
+              "name": "lookup",
+              "arguments": "{\"topic\":\"math\"}"
+            }
+          }
+        ]
+      },
+      "finish_reason": "tool_calls"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 10,
+    "completion_tokens": 4,
+    "total_tokens": 14
+  }
+}

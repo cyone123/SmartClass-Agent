@@ -8,7 +8,9 @@
 
 # Environment variables
 .env
-.env.docker
+.env.*
+!.env*.example
+!.env.example
 
 # Build
 build/

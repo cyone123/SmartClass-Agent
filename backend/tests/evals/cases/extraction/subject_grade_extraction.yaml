@@ -1,0 +1,42 @@
+case_id: extraction_subject_grade_001
+category: extraction_quality
+description: "评估系统对学科和年级的抽取准确性"
+version: "1.0"
+
+input:
+  user_id: "eval_user_ext_005"
+  plan_id: 15
+  thread_id: "eval_thread_ext_005"
+  message: "我是高中物理老师，想为高一学生设计关于牛顿运动定律的课程"
+  attachments: []
+
+context:
+  user_profile:
+    role: "teacher"
+  chat_history: []
+
+expectations:
+  subject_extracted_correctly: true
+  grade_extracted_correctly: true
+
+assertions:
+  - type: "route_match"
+    field: "metadata_action"
+    expected: "clarify"
+    weight: 1.0
+
+  - type: "extraction_quality"
+    field: "teaching_metadata"
+    expected: {"complete": false}
+    weight: 1.0
+    min_score: 0.0
+
+  - type: "contains"
+    field: "pending_nodes"
+    expected: "interrupt_for_userinput"
+    weight: 0.8
+
+metadata:
+  author: "eval_designer"
+  created_at: "2026-06-11"
+  tags: ["extraction", "subject_grade", "final_only_metadata"]

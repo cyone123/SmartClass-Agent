@@ -1,0 +1,31 @@
+{
+  "id": "offline-1",
+  "type": "message",
+  "role": "assistant",
+  "model": "fixture-model",
+  "content": [
+    {
+      "type": "thinking",
+      "thinking": "private fixture reasoning",
+      "signature": "fixture-signature"
+    },
+    {
+      "type": "text",
+      "text": "Visible"
+    },
+    {
+      "type": "tool_use",
+      "id": "call-a",
+      "name": "lookup",
+      "input": {
+        "topic": "math"
+      }
+    }
+  ],
+  "stop_reason": "tool_use",
+  "stop_sequence": null,
+  "usage": {
+    "input_tokens": 10,
+    "output_tokens": 4
+  }
+}

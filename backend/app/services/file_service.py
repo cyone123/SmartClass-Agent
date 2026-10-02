@@ -1,0 +1,792 @@
+from __future__ import annotations
+
+import contextlib
+import hashlib
+import mimetypes
+import re
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import TYPE_CHECKING, Iterator
+
+from fastapi import HTTPException, UploadFile, status
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.config import (
+    get_allowed_attachment_upload_extensions,
+    get_allowed_knowledge_upload_extensions,
+    get_allowed_voice_upload_extensions,
+    get_file_storage_root,
+    get_file_upload_max_size_bytes,
+)
+from app.core.progress import ProgressReporter
+from app.core.rag import RagRuntime
+from app.core.storage import build_storage_key, get_storage_service
+from app.models.file import AttachmentFile, KnowledgeFile
+from app.models.plan import Plan
+from app.models.session import Session
+
+if TYPE_CHECKING:
+    from app.core.agent import AgentRuntime
+
+FILE_STATUS_UPLOADED = "uploaded"
+FILE_STATUS_INDEXING = "indexing"
+FILE_STATUS_READY = "ready"
+FILE_STATUS_FAILED = "failed"
+FILE_STATUS_DELETED = "deleted"
+ACTIVE_FILE_STATUSES = (
+    FILE_STATUS_UPLOADED,
+    FILE_STATUS_INDEXING,
+    FILE_STATUS_READY,
+)
+
+
+def _sanitize_filename(filename: str) -> str:
+    safe_name = re.sub(r"[^A-Za-z0-9._-]+", "_", filename).strip("._")
+    return safe_name or "file"
+
+
+def _guess_mime_type(filename: str, fallback: str | None) -> str:
+    guessed_type, _ = mimetypes.guess_type(filename)
+    return guessed_type or fallback or "application/octet-stream"
+
+
+def _build_storage_path(plan_id: int, file_id: int, original_name: str) -> tuple[str, Path]:
+    # safe_name = _sanitize_filename(original_name)
+    stored_name = original_name  # f"{file_id}.{safe_name}"
+    storage_path = get_file_storage_root() / "plan_files" / str(plan_id) / stored_name
+    return stored_name, storage_path
+
+
+def _build_knowledge_storage_key(
+    *,
+    plan_id: int,
+    user_id: int,
+    file_id: int,
+    stored_name: str,
+) -> str:
+    return build_storage_key(
+        "knowledge",
+        f"user-{user_id}",
+        f"plan-{plan_id}",
+        f"file-{file_id}",
+        stored_name,
+    )
+
+
+def _build_attachment_storage_path(
+    plan_id: int,
+    thread_id: str,
+    attachment_id: int,
+    original_name: str,
+) -> tuple[str, Path]:
+    # safe_name = _sanitize_filename(original_name)
+    stored_name = original_name  # f"{attachment_id}.{safe_name}"
+    storage_path = get_file_storage_root() / "attachments" / thread_id / stored_name
+    return stored_name, storage_path
+
+
+def _build_attachment_storage_key(
+    *,
+    plan_id: int,
+    user_id: int,
+    thread_id: str,
+    attachment_id: int,
+    stored_name: str,
+) -> str:
+    return build_storage_key(
+        "attachments",
+        f"user-{user_id}",
+        f"plan-{plan_id}",
+        f"thread-{thread_id}",
+        f"attachment-{attachment_id}",
+        stored_name,
+    )
+
+
+def _normalize_extension(extension: str | None) -> str:
+    return (extension or "").strip().lower()
+
+
+def is_voice_attachment_extension(extension: str | None) -> bool:
+    return _normalize_extension(extension) in get_allowed_voice_upload_extensions()
+
+
+def is_document_attachment_extension(extension: str | None) -> bool:
+    return _normalize_extension(extension) in get_allowed_attachment_upload_extensions()
+
+
+def is_video_attachment_extension(extension: str | None) -> bool:
+    return _normalize_extension(extension) == ".mp4"
+
+
+def _mime_type_matches(mime_type: str | None, prefix: str) -> bool:
+    return (mime_type or "").strip().lower().startswith(prefix)
+
+
+def is_voice_attachment_record(attachment: AttachmentFile) -> bool:
+    if _mime_type_matches(attachment.mime_type, "audio/"):
+        return True
+    return _normalize_extension(attachment.extension) in (get_allowed_voice_upload_extensions() - {".mp4"})
+
+
+def is_video_attachment_record(attachment: AttachmentFile) -> bool:
+    if _mime_type_matches(attachment.mime_type, "video/"):
+        return True
+    return is_video_attachment_extension(attachment.extension) and not _mime_type_matches(
+        attachment.mime_type,
+        "audio/",
+    )
+
+
+async def _read_and_validate_upload_file(
+    upload_file: UploadFile,
+    *,
+    allowed_extensions: set[str],
+) -> tuple[str, str, bytes, int, str, str]:
+    original_name = upload_file.filename or "file"
+    extension = Path(original_name).suffix.lower()
+    if extension not in allowed_extensions:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unsupported file type: {extension or 'unknown'}.",
+        )
+
+    content = await upload_file.read()
+    size_bytes = len(content)
+    if size_bytes == 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Empty file is not allowed.",
+        )
+
+    max_size = get_file_upload_max_size_bytes()
+    if size_bytes > max_size:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"File exceeds max size limit: {max_size} bytes.",
+        )
+
+    sha256 = hashlib.sha256(content).hexdigest()
+    mime_type = _guess_mime_type(original_name, upload_file.content_type)
+    return original_name, extension, content, size_bytes, sha256, mime_type
+
+
+async def ensure_plan_exists(
+    db: AsyncSession,
+    plan_id: int,
+    *,
+    user_id: int | None = None,
+) -> Plan:
+    if user_id is None:
+        plan = await db.get(Plan, plan_id)
+    else:
+        stmt = select(Plan).where(Plan.id == plan_id, Plan.user_id == user_id)
+        result = await db.execute(stmt)
+        plan = result.scalar_one_or_none()
+    if plan is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Plan {plan_id} not found.",
+        )
+    return plan
+
+
+async def ensure_thread_belongs_to_plan(
+    db: AsyncSession,
+    plan_id: int,
+    thread_id: str,
+    *,
+    user_id: int | None = None,
+) -> Session:
+    stmt = select(Session).where(Session.thread_id == thread_id)
+    if user_id is not None:
+        stmt = stmt.where(Session.user_id == user_id)
+    result = await db.execute(stmt)
+    session_record = result.scalar_one_or_none()
+    if session_record is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Thread {thread_id} not found.",
+        )
+    if session_record.plan_id != plan_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Thread {thread_id} does not belong to plan {plan_id}.",
+        )
+    return session_record
+
+
+async def get_file_by_id(
+    db: AsyncSession,
+    file_id: int,
+    *,
+    user_id: int | None = None,
+    include_deleted: bool = False,
+) -> KnowledgeFile | None:
+    if user_id is None:
+        file_record = await db.get(KnowledgeFile, file_id)
+    else:
+        stmt = select(KnowledgeFile).where(KnowledgeFile.id == file_id, KnowledgeFile.user_id == user_id)
+        result = await db.execute(stmt)
+        file_record = result.scalar_one_or_none()
+    if file_record is None:
+        return None
+    if not include_deleted and file_record.status == FILE_STATUS_DELETED:
+        return None
+    return file_record
+
+
+async def list_files_by_plan(db: AsyncSession, plan_id: int, *, user_id: int) -> list[KnowledgeFile]:
+    await ensure_plan_exists(db, plan_id, user_id=user_id)
+    stmt = (
+        select(KnowledgeFile)
+        .where(
+            KnowledgeFile.plan_id == plan_id,
+            KnowledgeFile.user_id == user_id,
+            KnowledgeFile.status != FILE_STATUS_DELETED,
+        )
+        .order_by(KnowledgeFile.id.desc())
+    )
+    result = await db.execute(stmt)
+    return list(result.scalars().all())
+
+
+async def get_existing_file_by_hash(
+    db: AsyncSession,
+    *,
+    plan_id: int,
+    sha256: str,
+    user_id: int,
+) -> KnowledgeFile | None:
+    stmt = (
+        select(KnowledgeFile)
+        .where(
+            KnowledgeFile.plan_id == plan_id,
+            KnowledgeFile.user_id == user_id,
+            KnowledgeFile.sha256 == sha256,
+            KnowledgeFile.status.in_(ACTIVE_FILE_STATUSES),
+        )
+        .order_by(KnowledgeFile.id.desc())
+    )
+    result = await db.execute(stmt)
+    return result.scalar_one_or_none()
+
+
+async def get_existing_attachment_by_hash(
+    db: AsyncSession,
+    *,
+    plan_id: int,
+    thread_id: str,
+    sha256: str,
+    user_id: int,
+) -> AttachmentFile | None:
+    stmt = (
+        select(AttachmentFile)
+        .where(
+            AttachmentFile.plan_id == plan_id,
+            AttachmentFile.user_id == user_id,
+            AttachmentFile.thread_id == thread_id,
+            AttachmentFile.sha256 == sha256,
+        )
+        .order_by(AttachmentFile.id.desc())
+    )
+    result = await db.execute(stmt)
+    return result.scalar_one_or_none()
+
+
+async def create_file_from_upload(
+    db: AsyncSession,
+    *,
+    plan_id: int,
+    upload_file: UploadFile,
+    user_id: int,
+) -> KnowledgeFile:
+    await ensure_plan_exists(db, plan_id, user_id=user_id)
+    original_name, extension, content, size_bytes, sha256, mime_type = await _read_and_validate_upload_file(
+        upload_file,
+        allowed_extensions=get_allowed_knowledge_upload_extensions(),
+    )
+
+    existing = await get_existing_file_by_hash(db, plan_id=plan_id, sha256=sha256, user_id=user_id)
+    if existing is not None:
+        return existing
+
+    file_record = KnowledgeFile(
+        plan_id=plan_id,
+        user_id=user_id,
+        original_name=original_name,
+        stored_name="",
+        extension=extension,
+        mime_type=mime_type,
+        size_bytes=size_bytes,
+        sha256=sha256,
+        storage_path="",
+        status=FILE_STATUS_UPLOADED,
+        error_message=None,
+        chunk_count=0,
+    )
+    db.add(file_record)
+    await db.flush()
+
+    stored_name, storage_path = _build_storage_path(plan_id, file_record.id, original_name)
+    storage_key = _build_knowledge_storage_key(
+        plan_id=plan_id,
+        user_id=user_id,
+        file_id=file_record.id,
+        stored_name=stored_name,
+    )
+    stored_object = get_storage_service().put_bytes(
+        key=storage_key,
+        data=content,
+        filename=stored_name,
+        mime_type=mime_type,
+        sha256=sha256,
+    )
+
+    file_record.stored_name = stored_name
+    file_record.storage_path = stored_object.storage_path or str(storage_path)
+    file_record.storage_backend = stored_object.backend
+    file_record.storage_key = stored_object.key
+    file_record.updated_at = datetime.now(timezone.utc)
+
+    await db.commit()
+    await db.refresh(file_record)
+    return file_record
+
+
+async def create_attachment_from_upload(
+    db: AsyncSession,
+    *,
+    plan_id: int,
+    thread_id: str,
+    upload_file: UploadFile,
+    user_id: int,
+) -> AttachmentFile:
+    await ensure_plan_exists(db, plan_id, user_id=user_id)
+    await ensure_thread_belongs_to_plan(db, plan_id, thread_id, user_id=user_id)
+    original_name, extension, content, size_bytes, sha256, mime_type = await _read_and_validate_upload_file(
+        upload_file,
+        allowed_extensions=get_allowed_attachment_upload_extensions(),
+    )
+
+    existing = await get_existing_attachment_by_hash(
+        db,
+        plan_id=plan_id,
+        thread_id=thread_id,
+        sha256=sha256,
+        user_id=user_id,
+    )
+    if existing is not None:
+        return existing
+
+    attachment_record = AttachmentFile(
+        plan_id=plan_id,
+        user_id=user_id,
+        thread_id=thread_id,
+        original_name=original_name,
+        stored_name="",
+        extension=extension,
+        mime_type=mime_type,
+        size_bytes=size_bytes,
+        sha256=sha256,
+        storage_path="",
+    )
+    db.add(attachment_record)
+    await db.flush()
+
+    stored_name, storage_path = _build_attachment_storage_path(
+        plan_id,
+        thread_id,
+        attachment_record.id,
+        original_name,
+    )
+    storage_key = _build_attachment_storage_key(
+        plan_id=plan_id,
+        user_id=user_id,
+        thread_id=thread_id,
+        attachment_id=attachment_record.id,
+        stored_name=stored_name,
+    )
+    stored_object = get_storage_service().put_bytes(
+        key=storage_key,
+        data=content,
+        filename=stored_name,
+        mime_type=mime_type,
+        sha256=sha256,
+    )
+
+    attachment_record.stored_name = stored_name
+    attachment_record.storage_path = stored_object.storage_path or str(storage_path)
+    attachment_record.storage_backend = stored_object.backend
+    attachment_record.storage_key = stored_object.key
+    attachment_record.updated_at = datetime.now(timezone.utc)
+
+    await db.commit()
+    await db.refresh(attachment_record)
+    return attachment_record
+
+
+async def create_voice_attachment_from_upload(
+    db: AsyncSession,
+    *,
+    plan_id: int,
+    thread_id: str,
+    upload_file: UploadFile,
+    user_id: int,
+) -> AttachmentFile:
+    await ensure_plan_exists(db, plan_id, user_id=user_id)
+    await ensure_thread_belongs_to_plan(db, plan_id, thread_id, user_id=user_id)
+    original_name, extension, content, size_bytes, sha256, mime_type = await _read_and_validate_upload_file(
+        upload_file,
+        allowed_extensions=get_allowed_voice_upload_extensions(),
+    )
+
+    existing = await get_existing_attachment_by_hash(
+        db,
+        plan_id=plan_id,
+        thread_id=thread_id,
+        sha256=sha256,
+        user_id=user_id,
+    )
+    if existing is not None and is_voice_attachment_extension(existing.extension):
+        return existing
+
+    attachment_record = AttachmentFile(
+        plan_id=plan_id,
+        user_id=user_id,
+        thread_id=thread_id,
+        original_name=original_name,
+        stored_name="",
+        extension=extension,
+        mime_type=mime_type,
+        size_bytes=size_bytes,
+        sha256=sha256,
+        storage_path="",
+    )
+    db.add(attachment_record)
+    await db.flush()
+
+    stored_name, storage_path = _build_attachment_storage_path(
+        plan_id,
+        thread_id,
+        attachment_record.id,
+        original_name,
+    )
+    storage_key = _build_attachment_storage_key(
+        plan_id=plan_id,
+        user_id=user_id,
+        thread_id=thread_id,
+        attachment_id=attachment_record.id,
+        stored_name=stored_name,
+    )
+    stored_object = get_storage_service().put_bytes(
+        key=storage_key,
+        data=content,
+        filename=stored_name,
+        mime_type=mime_type,
+        sha256=sha256,
+    )
+
+    attachment_record.stored_name = stored_name
+    attachment_record.storage_path = stored_object.storage_path or str(storage_path)
+    attachment_record.storage_backend = stored_object.backend
+    attachment_record.storage_key = stored_object.key
+    attachment_record.updated_at = datetime.now(timezone.utc)
+
+    await db.commit()
+    await db.refresh(attachment_record)
+    return attachment_record
+
+
+async def get_attachments_by_ids(
+    db: AsyncSession,
+    *,
+    plan_id: int,
+    thread_id: str,
+    attachment_ids: list[int],
+    user_id: int | None = None,
+) -> list[AttachmentFile]:
+    if not attachment_ids:
+        return []
+
+    unique_ids = list(dict.fromkeys(attachment_ids))
+    stmt = select(AttachmentFile).where(
+        AttachmentFile.plan_id == plan_id,
+        AttachmentFile.thread_id == thread_id,
+        AttachmentFile.id.in_(unique_ids),
+    )
+    if user_id is not None:
+        stmt = stmt.where(AttachmentFile.user_id == user_id)
+    result = await db.execute(stmt)
+    attachments = list(result.scalars().all())
+    attachment_by_id = {attachment.id: attachment for attachment in attachments}
+
+    missing_ids = [attachment_id for attachment_id in unique_ids if attachment_id not in attachment_by_id]
+    if missing_ids:
+        missing_id = missing_ids[0]
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=(f"Attachment {missing_id} not found for plan {plan_id} and thread {thread_id}."),
+        )
+
+    return [attachment_by_id[attachment_id] for attachment_id in attachment_ids]
+
+
+async def get_attachment_storage_paths_by_ids(
+    db: AsyncSession,
+    *,
+    plan_id: int,
+    thread_id: str,
+    attachment_ids: list[int],
+    user_id: int | None = None,
+) -> list[str]:
+    attachments = await get_chat_attachments_by_ids(
+        db,
+        plan_id=plan_id,
+        thread_id=thread_id,
+        attachment_ids=attachment_ids,
+        user_id=user_id,
+    )
+    # Legacy compatibility helper: callers that still expect storage paths should
+    # continue to receive the record field, while new analysis paths use the
+    # materialize_attachment_* context managers.
+    return [attachment.storage_path for attachment in attachments]
+
+
+async def get_chat_attachments_by_ids(
+    db: AsyncSession,
+    *,
+    plan_id: int,
+    thread_id: str,
+    attachment_ids: list[int],
+    user_id: int | None = None,
+) -> list[AttachmentFile]:
+    attachments = await get_attachments_by_ids(
+        db,
+        plan_id=plan_id,
+        thread_id=thread_id,
+        attachment_ids=attachment_ids,
+        user_id=user_id,
+    )
+    for attachment in attachments:
+        if is_voice_attachment_record(attachment):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"Attachment {attachment.id} is a voice attachment and cannot be used for chat attachment analysis."
+                ),
+            )
+        if not get_storage_service().exists(
+            storage_backend=attachment.storage_backend,
+            storage_key=attachment.storage_key,
+            storage_path=attachment.storage_path,
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Stored attachment content not found for attachment {attachment.id}.",
+            )
+    return attachments
+
+
+@contextlib.contextmanager
+def materialize_attachment_file(attachment: AttachmentFile) -> Iterator[Path]:
+    with get_storage_service().materialize_temp_file(
+        storage_backend=attachment.storage_backend,
+        storage_key=attachment.storage_key,
+        storage_path=attachment.storage_path,
+        suffix=attachment.extension or Path(attachment.original_name).suffix,
+    ) as file_path:
+        yield file_path
+
+
+@contextlib.contextmanager
+def materialize_attachment_files(attachments: list[AttachmentFile]) -> Iterator[list[Path]]:
+    stack = contextlib.ExitStack()
+    try:
+        paths = [stack.enter_context(materialize_attachment_file(attachment)) for attachment in attachments]
+        yield paths
+    finally:
+        stack.close()
+
+
+@contextlib.contextmanager
+def materialize_knowledge_file(file_record: KnowledgeFile) -> Iterator[Path]:
+    with get_storage_service().materialize_temp_file(
+        storage_backend=file_record.storage_backend,
+        storage_key=file_record.storage_key,
+        storage_path=file_record.storage_path,
+        suffix=file_record.extension or Path(file_record.original_name).suffix,
+    ) as file_path:
+        yield file_path
+
+
+async def parse_attachment_files(
+    message: str,
+    file_paths: list[str],
+    agent_runtime: AgentRuntime,
+    progress_reporter: ProgressReporter | None = None,
+) -> str:
+    return await agent_runtime.analyze_attachments(
+        message,
+        file_paths,
+        progress_reporter=progress_reporter,
+    )
+
+
+async def mark_file_indexing(db: AsyncSession, file_record: KnowledgeFile) -> KnowledgeFile:
+    file_record.status = FILE_STATUS_INDEXING
+    file_record.error_message = None
+    file_record.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    await db.refresh(file_record)
+    return file_record
+
+
+async def mark_file_ready(
+    db: AsyncSession,
+    file_record: KnowledgeFile,
+    *,
+    chunk_count: int,
+) -> KnowledgeFile:
+    file_record.status = FILE_STATUS_READY
+    file_record.chunk_count = chunk_count
+    file_record.error_message = None
+    file_record.indexed_at = datetime.now(timezone.utc)
+    file_record.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    await db.refresh(file_record)
+    return file_record
+
+
+async def mark_file_failed(
+    db: AsyncSession,
+    file_record: KnowledgeFile,
+    *,
+    error_message: str,
+) -> KnowledgeFile:
+    file_record.status = FILE_STATUS_FAILED
+    file_record.error_message = error_message[:2000]
+    file_record.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    await db.refresh(file_record)
+    return file_record
+
+
+async def retry_file(db: AsyncSession, file_id: int, *, user_id: int) -> KnowledgeFile:
+    file_record = await get_file_by_id(db, file_id, user_id=user_id, include_deleted=True)
+    if file_record is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"File {file_id} not found.",
+        )
+    if file_record.status == FILE_STATUS_DELETED:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Deleted file cannot be retried.",
+        )
+    file_record.status = FILE_STATUS_UPLOADED
+    file_record.error_message = None
+    file_record.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    await db.refresh(file_record)
+    return file_record
+
+
+async def mark_file_deleted(db: AsyncSession, file_record: KnowledgeFile) -> KnowledgeFile:
+    file_record.status = FILE_STATUS_DELETED
+    file_record.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    await db.refresh(file_record)
+    return file_record
+
+
+async def delete_file(
+    db: AsyncSession,
+    *,
+    file_id: int,
+    user_id: int,
+    rag_runtime: RagRuntime,
+) -> None:
+    file_record = await get_file_by_id(db, file_id, user_id=user_id, include_deleted=True)
+    if file_record is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"File {file_id} not found.",
+        )
+
+    await rag_runtime.delete_by_file_id(file_id)
+    await mark_file_deleted(db, file_record)
+
+    if file_record.storage_path or file_record.storage_key:
+        get_storage_service().delete(
+            storage_backend=file_record.storage_backend,
+            storage_key=file_record.storage_key,
+            storage_path=file_record.storage_path,
+        )
+
+
+async def get_recoverable_file_ids(db: AsyncSession) -> list[int]:
+    stmt = (
+        select(KnowledgeFile)
+        .where(KnowledgeFile.status.in_((FILE_STATUS_UPLOADED, FILE_STATUS_INDEXING)))
+        .order_by(KnowledgeFile.id.asc())
+    )
+    result = await db.execute(stmt)
+    file_records = list(result.scalars().all())
+    recoverable_ids: list[int] = []
+    for file_record in file_records:
+        if file_record.status == FILE_STATUS_INDEXING:
+            file_record.status = FILE_STATUS_UPLOADED
+            file_record.updated_at = datetime.now(timezone.utc)
+        recoverable_ids.append(file_record.id)
+    if file_records:
+        await db.commit()
+    return recoverable_ids
+
+
+async def process_file_ingestion(
+    db: AsyncSession,
+    *,
+    file_id: int,
+    user_id: int | None = None,
+    rag_runtime: RagRuntime,
+) -> None:
+    file_record = await get_file_by_id(db, file_id, user_id=user_id, include_deleted=True)
+    if file_record is None or file_record.status == FILE_STATUS_DELETED:
+        return
+
+    await mark_file_indexing(db, file_record)
+
+    try:
+        if not rag_runtime.supports_file_extension(file_record.extension):
+            raise ValueError(f"Unsupported extension for ingestion: {file_record.extension}")
+        if not get_storage_service().exists(
+            storage_backend=file_record.storage_backend,
+            storage_key=file_record.storage_key,
+            storage_path=file_record.storage_path,
+        ):
+            raise FileNotFoundError(f"Missing stored file: {file_record.storage_path}")
+
+        with materialize_knowledge_file(file_record) as file_path:
+            documents = await rag_runtime.load_and_split_file(str(file_path))
+        enriched_documents = []
+        for index, document in enumerate(documents):
+            page = document.metadata.get("page")
+            normalized_page = int(page) if isinstance(page, int) else None
+            document.metadata = {
+                **document.metadata,
+                "plan_id": file_record.plan_id,
+                "file_id": file_record.id,
+                "source_name": file_record.original_name,
+                "chunk_index": index,
+                "page": normalized_page,
+            }
+            enriched_documents.append(document)
+
+        await rag_runtime.delete_by_file_id(file_record.id)
+        await rag_runtime.add_documents(enriched_documents)
+        await mark_file_ready(db, file_record, chunk_count=len(enriched_documents))
+    except Exception as exc:
+        await mark_file_failed(db, file_record, error_message=str(exc))
+        raise

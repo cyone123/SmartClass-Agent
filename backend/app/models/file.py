@@ -1,0 +1,174 @@
+from __future__ import annotations
+
+from datetime import datetime
+from typing import TYPE_CHECKING
+
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from app.models.base import Base
+
+if TYPE_CHECKING:
+    from app.models.plan import Plan
+    from app.models.user import User
+
+
+class KnowledgeFile(Base):
+    __tablename__ = "knowledge_files"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("users.id"),
+        nullable=False,
+        index=True,
+    )
+    plan_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("teaching_plans.id"),
+        nullable=False,
+        index=True,
+    )
+    original_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    stored_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    extension: Mapped[str] = mapped_column(String(20), nullable=False)
+    mime_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    sha256: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    storage_path: Mapped[str] = mapped_column(String(1024), nullable=False)
+    storage_backend: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
+    storage_key: Mapped[str | None] = mapped_column(String(1024), nullable=True, index=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    chunk_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+    indexed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    user: Mapped[User] = relationship("User", back_populates="knowledge_files")
+    plan: Mapped[Plan] = relationship("Plan", back_populates="files")
+
+
+class AttachmentFile(Base):
+    __tablename__ = "attachment_files"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("users.id"),
+        nullable=False,
+        index=True,
+    )
+    plan_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("teaching_plans.id"),
+        nullable=False,
+        index=True,
+    )
+    thread_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    original_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    stored_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    extension: Mapped[str] = mapped_column(String(20), nullable=False)
+    mime_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    sha256: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    storage_path: Mapped[str] = mapped_column(String(1024), nullable=False)
+    storage_backend: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
+    storage_key: Mapped[str | None] = mapped_column(String(1024), nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    user: Mapped[User] = relationship("User", back_populates="attachment_files")
+    plan: Mapped[Plan] = relationship("Plan", back_populates="attachments")
+
+
+class ArtifactFile(Base):
+    __tablename__ = "artifact_files"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("users.id"),
+        nullable=False,
+        index=True,
+    )
+    plan_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("teaching_plans.id"),
+        nullable=False,
+        index=True,
+    )
+    thread_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    artifact_type: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    parent_artifact_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("artifact_files.id"),
+        nullable=True,
+        index=True,
+    )
+    root_artifact_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("artifact_files.id"),
+        nullable=True,
+        index=True,
+    )
+    revision_number: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    is_current: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, index=True)
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    original_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    stored_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    extension: Mapped[str] = mapped_column(String(20), nullable=False)
+    mime_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    storage_path: Mapped[str] = mapped_column(String(1024), nullable=False)
+    storage_backend: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
+    storage_key: Mapped[str | None] = mapped_column(String(1024), nullable=True, index=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    user: Mapped[User] = relationship("User", back_populates="artifact_files")
+    plan: Mapped[Plan] = relationship("Plan", back_populates="artifacts")
+    parent_artifact: Mapped["ArtifactFile | None"] = relationship(
+        "ArtifactFile",
+        remote_side="ArtifactFile.id",
+        foreign_keys=[parent_artifact_id],
+        post_update=True,
+    )
+    root_artifact: Mapped["ArtifactFile | None"] = relationship(
+        "ArtifactFile",
+        remote_side="ArtifactFile.id",
+        foreign_keys=[root_artifact_id],
+        post_update=True,
+    )

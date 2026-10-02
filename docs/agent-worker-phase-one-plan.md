@@ -203,7 +203,7 @@ running 且租约过期             → 进入失联处理，不重新执行
 4. 接入：API 模式切换、旧入口处理、取消/历史恢复前端、Compose、Windows 启动。
 5. 上线准备：真实 PG+Redis 集成、人工耗时产物冒烟、发布和回滚演练。
 
-建议作为一个独立 OpenSpec change：extract-chat-run-worker-phase-one。规范覆盖 durable-chat-runs、docker-deployment、external-observability；当前 MVP change 不直接改写为本批任务。实现提交遵循子模块先提交、根仓库再更新指针。
+建议作为一个独立 OpenSpec change：extract-chat-run-worker-phase-one。规范覆盖 durable-chat-runs、docker-deployment、external-observability；当前 MVP change 不直接改写为本批任务。实现改动在 monorepo 根仓库统一提交。
 
 ## 11. 验收矩阵
 

@@ -1,0 +1,2567 @@
+from __future__ import annotations
+
+import asyncio
+import contextvars
+import inspect
+import json
+import re
+import shutil
+import time
+import zipfile
+from collections.abc import AsyncIterator
+from contextlib import suppress
+from pathlib import Path
+from typing import Any, Callable, Literal, Optional, TypedDict
+
+from fastapi import Request
+from langchain.agents import create_agent
+from langchain.agents.middleware import (
+    AgentMiddleware,
+    AgentState,
+    FilesystemFileSearchMiddleware,
+    ModelRequest,
+    ModelResponse,
+    ToolRetryMiddleware,
+    dynamic_prompt,
+)
+from langchain.messages import SystemMessage
+from langchain.tools import ToolRuntime, tool
+from langchain_core.messages import (
+    AIMessage,
+    AIMessageChunk,
+    AnyMessage,
+    BaseMessage,
+    HumanMessage,
+    ToolMessage,
+)
+from langchain_core.runnables import RunnableConfig
+from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+from langgraph.store.base import BaseStore
+from langgraph.types import Command
+
+from app.config import (
+    get_backend_root,
+    get_experience_memory_context_max_chars,
+    get_experience_memory_item_limit,
+    get_experience_memory_tool_output_max_chars,
+    get_workspace_execution_backend,
+)
+from app.core.context_compression import (
+    CompressionSettings,
+    compress_state_messages,
+)
+from app.core.graph import (
+    RESUMABLE_INTERRUPT_NODES,
+    build_agent_graph,
+    build_input_messages,
+    get_pending_approval_payload,
+)
+from app.core.llm import get_model, get_small_model
+from app.core.memory import DEFAULT_USER_ID
+from app.core.memory_retrieval import (
+    MemoryBundle,
+    MemoryContextProvider,
+    MemoryQuery,
+    MemoryRequest,
+    build_experience_background_message,
+)
+from app.core.model_access import current_snapshot, use_snapshot
+from app.core.model_access.admission import admission_graph, persist_admission, recover_legacy_workflow
+from app.core.model_access.errors import safe_error
+from app.core.model_access.messages import display_text
+from app.core.model_access.workflow import entry_update
+from app.core.model_runtime import build_profile_background_message
+from app.core.observability import (
+    ObservationSink,
+    RunContext,
+    categorize_error,
+    extract_token_usage,
+    get_observation_sink,
+    log_observation,
+    observation_sink_from_config,
+    observe_llm_call,
+    record_metric,
+    run_context_from_config,
+)
+from app.core.office_artifacts import normalize_pptx_presentation_order
+from app.core.progress import (
+    ProgressReporter,
+    ProgressTracker,
+    register_progress_reporter,
+    unregister_progress_reporter,
+)
+from app.core.rag import RagRuntime
+from app.core.skills import SkillRegistry, SkillToolset, create_skill_registry
+from app.core.state import SubAgentResult, TeachingAssistantState
+from app.core.video_transcribe import VideoTranscriptionRuntime
+from app.core.workspace import WorkspaceToolset, get_workspace_paths
+from app.dependencies.db import (
+    AsyncSessionLocal,
+    close_agent_checkpointer,
+    init_agent_checkpointer,
+    init_memory_store,
+)
+from app.models.file import ArtifactFile, AttachmentFile
+from app.services import artifact_service, file_service
+
+ArtifactType = Literal["ppt", "docx", "html-game"]
+StreamEventEmitter = Callable[[dict[str, Any]], None]
+ArtifactEventEmitter = StreamEventEmitter
+ArtifactTraceEventEmitter = StreamEventEmitter
+RootTextEventEmitter = Callable[[str], None]
+ArtifactTraceEntryKind = Literal["status", "tool_call", "tool_result", "ai_message"]
+
+ARTIFACT_EXECUTION_CONTRACT = (
+    "Execution contract: this is a file-generation job, not a planning or advisory response. "
+    "Use the available tools to create the requested file during this run. "
+    "Before returning a final response, verify that the final artifact exists under AGENT_OUTPUT_DIR. "
+    "A final response without a generated file is a failed job."
+)
+
+ARTIFACT_AGENT_SYSTEM_PROMPTS: dict[ArtifactType, str] = {
+    "ppt": (
+        "You are a teaching PPT generation agent embedded inside a LangGraph workflow. "
+        "Generate a real .pptx artifact. Use the `ppt-generator` skill. "
+        "For new code, use workspace tools. For scripts that already belong to a skill, "
+        "use `run_skill_script`. Do not use `shell` for Python or Node.js execution or installs."
+    ),
+    "docx": (
+        "You are a DOCX lesson-plan generation agent embedded inside a LangGraph workflow. "
+        "Generate a real .docx lesson-plan document. Use the `docx` skill. "
+        "Write any temporary code with workspace tools, and never install dependencies yourself."
+    ),
+    "html-game": (
+        "You are an HTML interactive activity generation agent embedded inside a LangGraph workflow whose target "
+        "user is teachers. Choose a topic and generate a single runnable .html artifact based on given information "
+        "to help teacher teach in class. Use the `html-interactive` skill and avoid local build tooling or package installs."
+    ),
+}
+
+
+class ArtifactAgentContext(TypedDict):
+    system_prompt: str
+
+
+@dynamic_prompt
+def artifact_dynamic_system_prompt(request: ModelRequest) -> str | SystemMessage:
+    """Return the complete prompt rendered once at artifact-task start."""
+
+    runtime_context = getattr(request.runtime, "context", None)
+    if isinstance(runtime_context, dict):
+        prompt = runtime_context.get("system_prompt")
+        if isinstance(prompt, str) and prompt:
+            return prompt
+    return request.system_message or "You are a teaching artifact generation agent."
+
+
+_ACTIVE_AGENT_CONFIG: contextvars.ContextVar[RunnableConfig | None] = contextvars.ContextVar(
+    "active_agent_config",
+    default=None,
+)
+
+ROOT_STREAMING_NODES = {
+    "teaching_design_planner",
+    "artifact_fan_in_node",
+}
+# Entry/intake use root_text_event_emitter for incremental text. Their native
+# LangGraph messages (including returned messages) stay filtered to avoid duplicates.
+SUGGESTION_COUNT = 3
+SUGGESTION_CONTEXT_WINDOW = 6
+WORKSPACE_TOOL_NAMES = {
+    "list_workspace_files",
+    "read_workspace_file",
+    "write_workspace_file",
+    "replace_workspace_text",
+    "run_workspace_code",
+}
+SKILL_GATED_TOOL_NAMES = {*WORKSPACE_TOOL_NAMES, "search_experience_memory"}
+BLOCKED_SHELL_PATTERN = re.compile(r"(?i)(^|\s)(python|python3|py|node|npm|npx|pip|pip3|pnpm|yarn|uv)\b")
+ARTIFACT_STEP_KEYS: dict[ArtifactType, str] = {
+    "ppt": "ppt_generation",
+    "docx": "lesson_plan_generation",
+    "html-game": "game_generation",
+}
+ARTIFACT_REVISION_STEP_KEYS: dict[ArtifactType, str] = {
+    "ppt": "ppt_revision",
+    "docx": "docx_revision",
+    "html-game": "game_revision",
+}
+ARTIFACT_STATE_KEYS: dict[ArtifactType, str] = {
+    "ppt": "ppt_result",
+    "docx": "lesson_plan_result",
+    "html-game": "game_result",
+}
+ARTIFACT_ALLOWED_EXTENSIONS: dict[ArtifactType, tuple[str, ...]] = {
+    "ppt": (".pptx",),
+    "docx": (".docx",),
+    "html-game": (".html",),
+}
+ARTIFACT_SOURCE_FILENAMES: dict[ArtifactType, str] = {
+    "ppt": "source_artifact.pptx",
+    "docx": "source_artifact.docx",
+    "html-game": "source_artifact.html",
+}
+ARTIFACT_TRACE_CONTENT_MAX_LENGTH = 1600
+
+
+class SkillAwareAgentState(AgentState[Any], total=False):
+    active_skills: list[str]
+
+
+def get_thread_config(
+    thread_id: str | None,
+    *,
+    run_id: str | None = None,
+    user_id: str | None = None,
+    plan_id: int | None = None,
+    run_context: RunContext | None = None,
+    observation_sink: ObservationSink | None = None,
+    progress_reporter: ProgressReporter | None = None,
+    artifact_event_emitter: ArtifactEventEmitter | None = None,
+    artifact_trace_event_emitter: ArtifactTraceEventEmitter | None = None,
+    root_text_event_emitter: RootTextEventEmitter | None = None,
+) -> RunnableConfig:
+    configurable: dict[str, Any] = {
+        "thread_id": thread_id,
+    }
+    if run_id is not None:
+        configurable["run_id"] = run_id
+    if user_id is not None:
+        configurable["user_id"] = user_id
+    if plan_id is not None:
+        configurable["plan_id"] = plan_id
+    if run_context is not None:
+        configurable["run_context"] = run_context
+    if observation_sink is not None:
+        configurable["observation_sink"] = observation_sink
+    if progress_reporter is not None:
+        configurable["progress_reporter"] = progress_reporter
+    if artifact_event_emitter is not None:
+        configurable["artifact_event_emitter"] = artifact_event_emitter
+    if artifact_trace_event_emitter is not None:
+        configurable["artifact_trace_event_emitter"] = artifact_trace_event_emitter
+    if root_text_event_emitter is not None:
+        configurable["root_text_event_emitter"] = root_text_event_emitter
+    return {"configurable": configurable}
+
+
+def _get_configurable_value(config: RunnableConfig | None, key: str) -> Any:
+    if not isinstance(config, dict):
+        return None
+    configurable = config.get("configurable")
+    if not isinstance(configurable, dict):
+        return None
+    return configurable.get(key)
+
+
+def _call_accepts_kwarg(callable_obj: Any, kwarg: str) -> bool:
+    try:
+        signature = inspect.signature(callable_obj)
+    except (TypeError, ValueError):
+        return True
+    return any(
+        parameter.kind == inspect.Parameter.VAR_KEYWORD or name == kwarg
+        for name, parameter in signature.parameters.items()
+    )
+
+
+def _get_run_context(config: RunnableConfig | None, *, default_run_id: str = "adhoc") -> RunContext:
+    value = _get_configurable_value(config, "run_context")
+    if isinstance(value, RunContext):
+        return value
+    return run_context_from_config(config, default_run_id=default_run_id)
+
+
+def _get_observation_sink(config: RunnableConfig | None) -> ObservationSink:
+    return observation_sink_from_config(config)
+
+
+def _get_artifact_event_emitter(config: RunnableConfig | None) -> ArtifactEventEmitter | None:
+    emitter = _get_configurable_value(config, "artifact_event_emitter")
+    return emitter if callable(emitter) else None
+
+
+def _get_artifact_trace_event_emitter(
+    config: RunnableConfig | None,
+) -> ArtifactTraceEventEmitter | None:
+    emitter = _get_configurable_value(config, "artifact_trace_event_emitter")
+    return emitter if callable(emitter) else None
+
+
+def _message_to_text(message) -> str:
+    return display_text(message)
+
+
+def _normalize_trace_content(
+    value: Any,
+    *,
+    max_length: int = ARTIFACT_TRACE_CONTENT_MAX_LENGTH,
+) -> str:
+    if value is None:
+        return ""
+
+    if isinstance(value, bytes):
+        text = f"<binary content: {len(value)} bytes>"
+    elif isinstance(value, BaseMessage):
+        text = _message_to_text(value)
+    elif isinstance(value, str):
+        text = value
+    elif isinstance(value, (dict, list, tuple)):
+        text = json.dumps(value, ensure_ascii=False, indent=2, default=str)
+    else:
+        text = str(value)
+
+    normalized = text.replace("\r\n", "\n").replace("\r", "\n")
+    normalized = re.sub(r"[ \t]+\n", "\n", normalized)
+    normalized = re.sub(r"\n{3,}", "\n\n", normalized)
+    normalized = normalized.strip()
+    if len(normalized) <= max_length:
+        return normalized
+    return f"{normalized[: max_length - 1].rstrip()}…"
+
+
+def _artifact_trace_tool_call_title(tool_call: dict[str, Any]) -> str:
+    tool_name = str(tool_call.get("name") or "unknown")
+    return f"调用工具 · {tool_name}"
+
+
+def _artifact_trace_tool_result_title(message: ToolMessage) -> str:
+    tool_name = message.name or "unknown"
+    return f"工具结果 · {tool_name}"
+
+
+def get_final_response_text(messages: list[AnyMessage]) -> str:
+    for message in reversed(messages):
+        if isinstance(message, AIMessage):
+            return _message_to_text(message).strip()
+    return ""
+
+
+def _normalize_suggestion_text(value: str) -> str:
+    text = re.sub(r"^\s*[-*]+\s*", "", value or "")
+    text = re.sub(r"^\s*\d+[.)、]\s*", "", text)
+    text = text.strip().strip("\"'")
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _sanitize_suggestions(values: list[str] | None) -> list[str]:
+    if not values:
+        return []
+
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for item in values:
+        text = _normalize_suggestion_text(item)
+        if not text:
+            continue
+        dedupe_key = text.casefold()
+        if dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
+        normalized.append(text)
+
+    return normalized[:SUGGESTION_COUNT]
+
+
+def _split_suggestion_lines(value: str) -> list[str]:
+    if not value:
+        return []
+
+    raw_lines = [line.strip() for line in re.split(r"\r?\n+", value) if line.strip()]
+    return raw_lines[: max(SUGGESTION_COUNT * 2, SUGGESTION_COUNT)]
+
+
+def _build_suggestion_conversation(messages: list[AnyMessage]) -> list[str]:
+    visible_messages = [
+        message
+        for message in messages
+        if isinstance(message, (HumanMessage, AIMessage)) and not isinstance(message, ToolMessage)
+    ]
+    conversation_slice = visible_messages[-SUGGESTION_CONTEXT_WINDOW:]
+
+    conversation_lines: list[str] = []
+    for message in conversation_slice:
+        role = "用户" if isinstance(message, HumanMessage) else "AI"
+        text = _message_to_text(message).strip()
+        if text:
+            conversation_lines.append(f"{role}: {text}")
+    return conversation_lines
+
+
+def _default_subagent_result(artifact_type: ArtifactType, *, status: str = "pending") -> SubAgentResult:
+    return {
+        "status": status,
+        "artifact_id": None,
+        "artifact_type": artifact_type,
+        "title": None,
+        "error": None,
+    }
+
+
+def _success_subagent_result(artifact_type: ArtifactType, *, artifact_id: int, title: str) -> SubAgentResult:
+    return {
+        "status": "ready",
+        "artifact_id": artifact_id,
+        "artifact_type": artifact_type,
+        "title": title,
+        "error": None,
+    }
+
+
+def _failed_subagent_result(
+    artifact_type: ArtifactType,
+    *,
+    artifact_id: int | None = None,
+    title: str | None = None,
+    error: str,
+) -> SubAgentResult:
+    return {
+        "status": "failed",
+        "artifact_id": artifact_id,
+        "artifact_type": artifact_type,
+        "title": title,
+        "error": error,
+    }
+
+
+def _artifact_payload(record: Any) -> dict[str, Any]:
+    return artifact_service.serialize_artifact(record)
+
+
+def _artifact_display_name(artifact_type: ArtifactType) -> str:
+    return {
+        "ppt": "课件",
+        "docx": "教案",
+        "html-game": "互动内容",
+    }[artifact_type]
+
+
+def _artifact_catalog_entry(record: ArtifactFile) -> dict[str, Any]:
+    return {
+        "id": record.id,
+        "type": record.artifact_type,
+        "title": record.title,
+        "status": record.status,
+        "thread_id": record.thread_id,
+        "plan_id": record.plan_id,
+        "storage_path": record.storage_path,
+        "storage_backend": record.storage_backend,
+        "storage_key": record.storage_key,
+        "revision_number": record.revision_number,
+        "parent_artifact_id": record.parent_artifact_id,
+        "root_artifact_id": record.root_artifact_id,
+        "is_current": record.is_current,
+    }
+
+
+class SkillPromptMiddleware(AgentMiddleware):
+    """Inject skill metadata into the agent system prompt."""
+
+    def __init__(self, registry: SkillRegistry) -> None:
+        skill_lines = [f"- **{skill.name}**: {skill.description}" for skill in registry.list_metadata()]
+        self.skills_prompt = "\n".join(skill_lines)
+
+    def _inject_skill_catalog(self, request: ModelRequest) -> ModelRequest:
+        skills_addendum = (
+            f"\n\n## Available Skills\n\n{self.skills_prompt}\n\n"
+            "Only the metadata above is preloaded. When a request matches a skill, "
+            "use `load_skill` to read its instructions. Then use `read_skill_resource` "
+            "or `run_skill_script` when you need to read relevant resources or run a skill script. "
+            "Only use workspace code tools after a skill is loaded and only when "
+            "that skill needs coding operations. Use workspace code tools for "
+            "temporary Python or JavaScript files, `run_skill_script` for scripts "
+            "that already ship with the skill, and reserve `shell` for non-code "
+            "system commands only. When calling `run_skill_script`, pass "
+            "`script_args` as a string array."
+        )
+
+        if request.system_message is None:
+            new_system_message = SystemMessage(content=skills_addendum.strip())
+        else:
+            new_content = list(request.system_message.content_blocks) + [{"type": "text", "text": skills_addendum}]
+            new_system_message = SystemMessage(content=new_content)
+        return request.override(system_message=new_system_message)
+
+    def wrap_model_call(
+        self,
+        request: ModelRequest,
+        handler: Callable[[ModelRequest], ModelResponse],
+    ) -> ModelResponse:
+        return handler(self._inject_skill_catalog(request))
+
+    async def awrap_model_call(
+        self,
+        request: ModelRequest,
+        handler: Callable[[ModelRequest], ModelResponse],
+    ) -> ModelResponse:
+        return await handler(self._inject_skill_catalog(request))
+
+
+class SkillExecutionPolicyMiddleware(AgentMiddleware[SkillAwareAgentState, Any, Any]):
+    """Track active skills and guard skill-aware execution tools."""
+
+    state_schema = SkillAwareAgentState
+
+    def __init__(self, registry: SkillRegistry) -> None:
+        self.registry = registry
+
+    def _get_active_skill_names(self, state: SkillAwareAgentState | dict[str, Any]) -> list[str]:
+        values = state.get("active_skills", []) or []
+        return [str(value) for value in values if isinstance(value, str)]
+
+    def _get_authorized_skills(
+        self,
+        state: SkillAwareAgentState | dict[str, Any],
+        *,
+        tool_name: str,
+    ) -> list[str]:
+        active_skill_names = self._get_active_skill_names(state)
+        return [
+            skill_name for skill_name in active_skill_names if self.registry.skill_allows_tool(skill_name, tool_name)
+        ]
+
+    def _build_active_skill_section(self, active_skill_names: list[str]) -> str:
+        if not active_skill_names:
+            return ""
+
+        lines = ["\n\n## Active Skills"]
+        for skill_name in active_skill_names:
+            skill = self.registry.get_skill(skill_name)
+            allowed_tools = ", ".join(skill.allowed_tools) if skill.allowed_tools else "none"
+            compatibility = skill.compatibility or "none"
+            lines.append(f"- **{skill.name}**: allowed tools = {allowed_tools}; compatibility = {compatibility}")
+        lines.append(
+            "If you need temporary code, use workspace tools instead of `shell`. Do not install dependencies yourself."
+        )
+        return "\n".join(lines)
+
+    def _tool_error_message(
+        self,
+        *,
+        tool_name: str,
+        tool_call_id: str | None,
+        message: str,
+    ) -> ToolMessage:
+        return ToolMessage(
+            content=message,
+            name=tool_name,
+            tool_call_id=tool_call_id or "missing-tool-call-id",
+            status="error",
+        )
+
+    def _is_blocked_shell_command(self, command: str) -> bool:
+        return bool(BLOCKED_SHELL_PATTERN.search(command or ""))
+
+    def _with_active_skill_section(self, request: ModelRequest) -> ModelRequest:
+        active_skill_names = self._get_active_skill_names(request.state)
+        active_skill_section = self._build_active_skill_section(active_skill_names)
+        if not active_skill_section:
+            return request
+
+        if request.system_message is None:
+            system_message = SystemMessage(content=active_skill_section.strip())
+        else:
+            system_message = SystemMessage(
+                content=list(request.system_message.content_blocks) + [{"type": "text", "text": active_skill_section}]
+            )
+        return request.override(system_message=system_message)
+
+    def wrap_model_call(
+        self,
+        request: ModelRequest,
+        handler: Callable[[ModelRequest], ModelResponse],
+    ) -> ModelResponse:
+        return handler(self._with_active_skill_section(request))
+
+    async def awrap_model_call(
+        self,
+        request: ModelRequest,
+        handler: Callable[[ModelRequest], ModelResponse],
+    ) -> ModelResponse:
+        return await handler(self._with_active_skill_section(request))
+
+    def _handle_tool_call(self, request):
+        tool_name = request.tool_call.get("name")
+        if not isinstance(tool_name, str):
+            return None
+
+        if tool_name in SKILL_GATED_TOOL_NAMES:
+            authorized_skills = self._get_authorized_skills(request.state, tool_name=tool_name)
+            if not authorized_skills:
+                return self._tool_error_message(
+                    tool_name=tool_name,
+                    tool_call_id=request.tool_call.get("id"),
+                    message=(
+                        f"Skill authorization error: `{tool_name}` requires an active skill "
+                        "that explicitly lists it in `allowed-tools`. Load the right skill "
+                        "with `load_skill` first."
+                    ),
+                )
+
+        if tool_name == "shell":
+            args = request.tool_call.get("args", {}) or {}
+            command = args.get("command") if isinstance(args, dict) else None
+            if isinstance(command, str) and self._is_blocked_shell_command(command):
+                return self._tool_error_message(
+                    tool_name=tool_name,
+                    tool_call_id=request.tool_call.get("id"),
+                    message=(
+                        "Shell policy error: use workspace tools for Python or Node.js code "
+                        "execution and rely on host-managed dependencies instead of "
+                        "running installers from `shell`."
+                    ),
+                )
+
+        return None
+
+    def wrap_tool_call(self, request, handler):
+        guarded_response = self._handle_tool_call(request)
+        if guarded_response is not None:
+            return guarded_response
+        return handler(request)
+
+    async def awrap_tool_call(self, request, handler):
+        guarded_response = self._handle_tool_call(request)
+        if guarded_response is not None:
+            return guarded_response
+        return await handler(request)
+
+
+class LLMObservationMiddleware(AgentMiddleware):
+    """Record safe model/tool metrics without logging prompt or tool payloads."""
+
+    def __init__(self, *, agent_name: str) -> None:
+        self.agent_name = agent_name
+
+    def _request_config(self, request: Any) -> RunnableConfig | None:
+        config = getattr(request, "config", None)
+        if config is not None:
+            return config
+        runtime = getattr(request, "runtime", None)
+        config = getattr(runtime, "config", None)
+        if config is not None:
+            return config
+        state = getattr(request, "state", None)
+        if isinstance(state, dict):
+            for key in ("config", "runtime_config"):
+                value = state.get(key)
+                if value is not None:
+                    return value
+            configurable = state.get("configurable")
+            if isinstance(configurable, dict):
+                return {"configurable": configurable}
+        return _ACTIVE_AGENT_CONFIG.get()
+
+    def _request_messages(self, request: ModelRequest) -> list[AnyMessage]:
+        messages = getattr(request, "messages", None)
+        if isinstance(messages, list):
+            return [message for message in messages if isinstance(message, BaseMessage)]
+        state = getattr(request, "state", {}) or {}
+        if isinstance(state, dict):
+            state_messages = state.get("messages", []) or []
+            return [message for message in state_messages if isinstance(message, BaseMessage)]
+        return []
+
+    def _record_model_call(
+        self,
+        request: ModelRequest,
+        response: ModelResponse | None,
+        *,
+        duration_ms: int,
+        status: str,
+        error: BaseException | None = None,
+    ) -> None:
+        try:
+            config = self._request_config(request)
+            context = _get_run_context(config).with_agent(self.agent_name)
+            sink = _get_observation_sink(config)
+            request_messages = self._request_messages(request)
+            ai_messages = [
+                message
+                for message in (response.result if response is not None else [])
+                if isinstance(message, AIMessage)
+            ]
+            final_ai_message = ai_messages[-1] if ai_messages else None
+            tool_names: list[str] = []
+            for message in ai_messages:
+                for tool_call in message.tool_calls or []:
+                    name = tool_call.get("name")
+                    if isinstance(name, str):
+                        tool_names.append(name)
+            token_usage = extract_token_usage(response)
+            if not token_usage.get("token_usage_available"):
+                token_usage = extract_token_usage(final_ai_message)
+            fields: dict[str, Any] = {
+                "agent_name": self.agent_name,
+                "model": str(getattr(getattr(request, "model", None), "model_name", None) or "unknown"),
+                "message_count": len(request_messages),
+                "input_size": sum(len(_message_to_text(message)) for message in request_messages),
+                "output_size": sum(len(_message_to_text(message)) for message in ai_messages),
+                "tool_call_count": len(tool_names),
+                "tool_names": list(dict.fromkeys(tool_names)),
+                **token_usage,
+            }
+            if error is not None:
+                fields.update(
+                    {
+                        "error_category": categorize_error(error),
+                        "error_type": error.__class__.__name__,
+                        "error_message": str(error),
+                    }
+                )
+            record_metric(
+                "llm.call",
+                context=context,
+                sink=sink,
+                status="success" if status == "success" else "failed",
+                duration_ms=duration_ms,
+                fields=fields,
+            )
+        except Exception:
+            return
+
+    def _record_tool_call(
+        self,
+        request: Any,
+        response: Any | None,
+        *,
+        duration_ms: int,
+        status: str,
+        error: BaseException | None = None,
+    ) -> None:
+        try:
+            config = self._request_config(request)
+            context = _get_run_context(config).with_agent(self.agent_name)
+            sink = _get_observation_sink(config)
+            tool_call = getattr(request, "tool_call", {}) or {}
+            tool_name = tool_call.get("name") if isinstance(tool_call, dict) else None
+            fields: dict[str, Any] = {
+                "agent_name": self.agent_name,
+                "tool_name": tool_name or "unknown",
+                "tool_arg_keys": sorted((tool_call.get("args") or {}).keys())
+                if isinstance(tool_call, dict) and isinstance(tool_call.get("args"), dict)
+                else [],
+                "response_type": response.__class__.__name__ if response is not None else None,
+            }
+            if error is not None:
+                fields.update(
+                    {
+                        "error_category": categorize_error(error),
+                        "error_type": error.__class__.__name__,
+                        "error_message": str(error),
+                    }
+                )
+            record_metric(
+                "tool.invoke",
+                context=context,
+                sink=sink,
+                status="success" if status == "success" else "failed",
+                duration_ms=duration_ms,
+                fields=fields,
+            )
+        except Exception:
+            return
+
+    def wrap_model_call(
+        self,
+        request: ModelRequest,
+        handler: Callable[[ModelRequest], ModelResponse],
+    ) -> ModelResponse:
+        start = time.perf_counter()
+        try:
+            response = handler(request)
+        except Exception as exc:
+            self._record_model_call(
+                request,
+                None,
+                duration_ms=int((time.perf_counter() - start) * 1000),
+                status="failed",
+                error=exc,
+            )
+            raise
+        self._record_model_call(
+            request,
+            response,
+            duration_ms=int((time.perf_counter() - start) * 1000),
+            status="success",
+        )
+        return response
+
+    async def awrap_model_call(
+        self,
+        request: ModelRequest,
+        handler: Callable[[ModelRequest], ModelResponse],
+    ) -> ModelResponse:
+        start = time.perf_counter()
+        try:
+            response = await handler(request)
+        except Exception as exc:
+            self._record_model_call(
+                request,
+                None,
+                duration_ms=int((time.perf_counter() - start) * 1000),
+                status="failed",
+                error=exc,
+            )
+            raise
+        self._record_model_call(
+            request,
+            response,
+            duration_ms=int((time.perf_counter() - start) * 1000),
+            status="success",
+        )
+        return response
+
+    def wrap_tool_call(self, request, handler):
+        start = time.perf_counter()
+        try:
+            response = handler(request)
+        except Exception as exc:
+            self._record_tool_call(
+                request,
+                None,
+                duration_ms=int((time.perf_counter() - start) * 1000),
+                status="failed",
+                error=exc,
+            )
+            raise
+        self._record_tool_call(
+            request,
+            response,
+            duration_ms=int((time.perf_counter() - start) * 1000),
+            status="success",
+        )
+        return response
+
+    async def awrap_tool_call(self, request, handler):
+        start = time.perf_counter()
+        try:
+            response = await handler(request)
+        except Exception as exc:
+            self._record_tool_call(
+                request,
+                None,
+                duration_ms=int((time.perf_counter() - start) * 1000),
+                status="failed",
+                error=exc,
+            )
+            raise
+        self._record_tool_call(
+            request,
+            response,
+            duration_ms=int((time.perf_counter() - start) * 1000),
+            status="success",
+        )
+        return response
+
+
+class AgentRuntime:
+    def __init__(
+        self,
+        checkpointer: AsyncPostgresSaver,
+        memory_store: BaseStore,
+        rag_runtime: RagRuntime,
+        skill_registry: SkillRegistry,
+        video_transcription_runtime: VideoTranscriptionRuntime,
+    ) -> None:
+        self.skill_registry = skill_registry
+        self.backend_root = get_backend_root()
+        self.skill_toolset = SkillToolset(skill_registry)
+        self.workspace_toolset = WorkspaceToolset()
+        self.checkpointer = checkpointer
+        self.memory_store = memory_store
+        self.memory_context_provider = MemoryContextProvider()
+        self.experience_search_tool = self._create_experience_search_tool()
+        self.rag_runtime = rag_runtime
+        self.video_transcription_runtime = video_transcription_runtime
+        self.suggestion_generator = None
+        self._thread_locks: dict[str | None, asyncio.Lock] = {}
+        self._thread_locks_guard = asyncio.Lock()
+
+        base_middleware = [
+            FilesystemFileSearchMiddleware(
+                root_path=str(self.backend_root),
+                use_ripgrep=True,
+            ),
+            SkillPromptMiddleware(skill_registry),
+            SkillExecutionPolicyMiddleware(skill_registry),
+            ToolRetryMiddleware(
+                max_retries=3,
+                backoff_factor=0.0,
+                initial_delay=1.0,
+            ),
+        ]
+
+        self.base_middleware = base_middleware
+        self.attachment_agent_runnable = None
+        self.ppt_agent_runnable = None
+        self.docx_agent_runnable = None
+        self.html_game_agent_runnable = None
+
+        self.streaming_graph = build_agent_graph(
+            checkpointer=checkpointer,
+            store=memory_store,
+            rag_runtime=rag_runtime,
+            ppt_generate_node=self.ppt_generate_node,
+            docx_generate_node=self.docx_generate_node,
+            html_generate_node=self.html_game_generate_node,
+            ppt_revision_node=self.ppt_revision_node,
+            docx_revision_node=self.docx_revision_node,
+            html_revision_node=self.html_game_revision_node,
+        )
+        self.graph = self.streaming_graph
+
+    def _attachment_agent(self):
+        if self.attachment_agent_runnable is not None:
+            return self.attachment_agent_runnable
+        return create_agent(
+            model=get_model(streaming=True),
+            tools=self.skill_toolset.tools + self.workspace_toolset.tools,
+            system_prompt=(
+                "You analyze uploaded materials for user. "
+                "Use the available skills when the task matches them. "
+                "Prefer progressive disclosure: load the skill instructions first, then read bundled "
+                "resources or run skill scripts when needed. If a loaded skill explicitly allows "
+                "workspace tools, you may write temporary Python or JavaScript files to the agent workspace "
+                "and execute them there. For document analysis, prefer `run_skill_script`. "
+                "Never use `shell` to run Python, Node.js, npm, or pip commands."
+            ),
+            middleware=[
+                *self.base_middleware,
+                LLMObservationMiddleware(agent_name="attachment_skill_agent"),
+            ],
+            name="attachment_skill_agent",
+        )
+
+    def _artifact_agent(self, kind):
+        attribute = {
+            "ppt": "ppt_agent_runnable",
+            "docx": "docx_agent_runnable",
+            "html-game": "html_game_agent_runnable",
+        }[kind]
+        injected = getattr(self, attribute, None)
+        if injected is not None:
+            return injected
+        return self._create_artifact_agent(
+            self.base_middleware,
+            agent_name={"ppt": "ppt_agent", "docx": "docx_agent", "html-game": "html_game_agent"}[kind],
+            system_prompt=ARTIFACT_AGENT_SYSTEM_PROMPTS[kind],
+        )
+
+    def _create_artifact_agent(
+        self,
+        base_middleware: list[Any],
+        *,
+        agent_name: str,
+        system_prompt: str,
+    ):
+        middleware = [
+            artifact_dynamic_system_prompt,
+            *base_middleware,
+            LLMObservationMiddleware(agent_name=agent_name),
+        ]
+        return create_agent(
+            model=get_model(streaming=False),
+            tools=self.skill_toolset.tools + self.workspace_toolset.tools + [self.experience_search_tool],
+            system_prompt=f"{system_prompt}\n\n{ARTIFACT_EXECUTION_CONTRACT}",
+            middleware=middleware,
+            context_schema=ArtifactAgentContext,
+            name=agent_name,
+        )
+
+    def _create_experience_search_tool(self):
+        provider = self.memory_context_provider
+        store = self.memory_store
+
+        @tool
+        async def search_experience_memory(query: str, runtime: ToolRuntime) -> str:
+            """Search this authenticated user's reusable teaching Experience memory."""
+
+            config = runtime.config
+            user_id = str(_get_configurable_value(config, "user_id") or "").strip()
+            if not user_id:
+                return "Experience memory is unavailable because authenticated runtime identity is missing."
+            request = MemoryRequest(
+                purpose="tool_search",
+                query=MemoryQuery(user_input=query),
+                max_items=min(2, get_experience_memory_item_limit()),
+                max_chars=min(
+                    get_experience_memory_tool_output_max_chars(),
+                    get_experience_memory_context_max_chars(),
+                ),
+            )
+            bundle = await provider.resolve(
+                store=store,
+                user_id=user_id,
+                request=request,
+                run_context=_get_run_context(config).with_agent("memory_tool"),
+                observation_sink=_get_observation_sink(config),
+            )
+            return bundle.context or "No relevant Experience memory found."
+
+        return search_experience_memory
+
+    @staticmethod
+    def _render_artifact_system_prompt(state: TeachingAssistantState, artifact_type: ArtifactType) -> str:
+        parts = [ARTIFACT_AGENT_SYSTEM_PROMPTS[artifact_type], ARTIFACT_EXECUTION_CONTRACT]
+        profile_message = build_profile_background_message(str(state.get("profile_memory_context") or ""))
+        if profile_message is not None:
+            parts.append(str(profile_message.content))
+        experience_message = build_experience_background_message(
+            MemoryBundle(
+                context=str(state.get("experience_memory_context") or ""),
+                selected_ids=tuple(str(value) for value in state.get("experience_memory_selected_ids") or []),
+                strategy=str(state.get("experience_memory_strategy") or "none"),
+                truncated=bool(state.get("experience_memory_truncated")),
+                degraded=bool(state.get("experience_memory_degraded")),
+            )
+        )
+        if experience_message is not None:
+            parts.append(str(experience_message.content))
+        return "\n\n".join(parts)
+
+    async def analyze_attachments(
+        self,
+        message: str,
+        file_paths: list[str],
+        *,
+        thread_id: str | None = None,
+        run_id: str | None = None,
+        user_id: str | None = None,
+        plan_id: int | None = None,
+        run_context: RunContext | None = None,
+        observation_sink: ObservationSink | None = None,
+        progress_reporter: ProgressReporter | None = None,
+    ) -> str:
+        context = (run_context or RunContext(run_id=run_id or thread_id or "adhoc")).with_agent("attachment_agent")
+        sink = observation_sink or get_observation_sink()
+        if progress_reporter:
+            progress_reporter.emit("attachment_analysis", "running")
+        log_observation(
+            "attachment_analysis",
+            context=context,
+            sink=sink,
+            status="running",
+            fields={
+                "message_size": len(message),
+                "attachment_count": len(file_paths),
+            },
+        )
+
+        user_prompt = (
+            "Analyze the uploaded attachment files according to the user's request. "
+            "Load the proper skills based on the file types and follow them. "
+            "Use bundled scripts or resources when needed, then return a concise useful summary.\n\n"
+            f"User message: {message}\n"
+            "Attachment file paths:\n" + "\n".join(f"- {Path(file_path)}" for file_path in file_paths)
+        )
+        final_msg_content = ""
+
+        try:
+            async for chunk in self._attachment_agent().astream(
+                {"messages": [{"role": "user", "content": user_prompt}]},
+                config=get_thread_config(
+                    thread_id or run_id,
+                    run_id=run_id,
+                    user_id=user_id,
+                    plan_id=plan_id,
+                    run_context=context,
+                    observation_sink=sink,
+                    progress_reporter=progress_reporter,
+                ),
+                stream_mode="updates",
+                version="v2",
+            ):
+                if chunk["type"] != "updates":
+                    continue
+
+                for step, data in chunk["data"].items():
+                    if step == "model":
+                        final_msg_content = _message_to_text(data["messages"][-1])
+        except Exception as exc:
+            if progress_reporter:
+                progress_reporter.emit("attachment_analysis", "failed", detail=str(exc))
+            log_observation(
+                "attachment_analysis",
+                context=context,
+                sink=sink,
+                status="failed",
+                fields={
+                    "error_category": categorize_error(exc),
+                    "error_type": exc.__class__.__name__,
+                    "error_message": str(exc),
+                },
+            )
+            raise
+
+        if progress_reporter:
+            progress_reporter.emit("attachment_analysis", "success", detail="已完成附件分析")
+        log_observation(
+            "attachment_analysis",
+            context=context,
+            sink=sink,
+            status="success",
+            fields={"summary_size": len(final_msg_content)},
+        )
+        return final_msg_content
+
+    def _partition_attachments(
+        self,
+        attachments: list[AttachmentFile],
+    ) -> tuple[list[AttachmentFile], list[AttachmentFile]]:
+        document_attachments: list[AttachmentFile] = []
+        video_attachments: list[AttachmentFile] = []
+        for attachment in attachments:
+            if file_service.is_video_attachment_record(attachment):
+                video_attachments.append(attachment)
+            else:
+                document_attachments.append(attachment)
+        return document_attachments, video_attachments
+
+    async def build_attachment_text(
+        self,
+        message: str,
+        attachments: list[AttachmentFile],
+        *,
+        thread_id: str | None = None,
+        run_id: str | None = None,
+        user_id: str | None = None,
+        plan_id: int | None = None,
+        run_context: RunContext | None = None,
+        observation_sink: ObservationSink | None = None,
+        progress_reporter: ProgressReporter | None = None,
+    ) -> str:
+        sections: list[str] = []
+        document_attachments, video_attachments = self._partition_attachments(attachments)
+
+        if document_attachments:
+            with file_service.materialize_attachment_files(document_attachments) as document_paths:
+                document_summary = await self.analyze_attachments(
+                    message,
+                    [str(path) for path in document_paths],
+                    thread_id=thread_id,
+                    run_id=run_id,
+                    user_id=user_id,
+                    plan_id=plan_id,
+                    run_context=run_context,
+                    observation_sink=observation_sink,
+                    progress_reporter=progress_reporter,
+                )
+            if document_summary.strip():
+                sections.append(f"文档附件摘要n{document_summary.strip()}")
+
+        for attachment in video_attachments:
+            with file_service.materialize_attachment_file(attachment) as video_path:
+                video_summary = await self.video_transcription_runtime.analyze(
+                    file_path=video_path,
+                    filename=attachment.original_name,
+                    mime_type=attachment.mime_type,
+                    progress_reporter=progress_reporter,
+                )
+            if video_summary.strip():
+                sections.append(video_summary.strip())
+
+        return "\n\n---\n\n".join(section for section in sections if section.strip()).strip()
+
+    async def _get_thread_lock(self, thread_id: str | None) -> asyncio.Lock:
+        async with self._thread_locks_guard:
+            lock = self._thread_locks.get(thread_id)
+            if lock is None:
+                lock = asyncio.Lock()
+                self._thread_locks[thread_id] = lock
+            return lock
+
+    async def _get_thread_state_snapshot(self, thread_id: str | None):
+        if not thread_id:
+            return None
+        return await self.streaming_graph.aget_state(get_thread_config(thread_id))
+
+    async def get_memory_reflection_checkpoint_values(self, thread_id: str | None) -> dict[str, Any] | None:
+        """Return a transient checkpoint projection for the bounded snapshot builder."""
+        state_snapshot = await self._get_thread_state_snapshot(thread_id)
+        values = getattr(state_snapshot, "values", None) if state_snapshot is not None else None
+        if not isinstance(values, dict):
+            return None
+        result = dict(values)
+        if "model_workflow_active" not in result and self._has_resumable_interrupt(state_snapshot):
+            result["model_workflow_active"] = True
+        if result.get("model_workflow_active") and not result.get("model_config_snapshot"):
+            result = await recover_legacy_workflow(self._admission_graph(), thread_id, result)
+        return result
+
+    def _admission_graph(self):
+        return admission_graph(self.streaming_graph.checkpointer)
+
+    async def _persist_model_envelope(self, thread_id, run_id, values, supplied):
+        return await persist_admission(self._admission_graph(), thread_id, run_id, values, supplied)
+
+    async def cancel_model_workflow(self, thread_id: str) -> None:
+        # Cancellation closes the workflow as well as its pending execution path.
+        await self.streaming_graph.aupdate_state(
+            get_thread_config(thread_id),
+            {"model_workflow_active": False, "teaching_task_active": False},
+            as_node="artifact_fan_in_node",
+        )
+
+    def _has_resumable_interrupt(self, state_snapshot: Any) -> bool:
+        interrupts = tuple(getattr(state_snapshot, "interrupts", ()) or ())
+        next_nodes = tuple(getattr(state_snapshot, "next", ()) or ())
+        return bool(interrupts) and any(node in RESUMABLE_INTERRUPT_NODES for node in next_nodes)
+
+    def _get_pending_approval_from_snapshot(self, state_snapshot: Any) -> dict[str, Any] | None:
+        interrupts = getattr(state_snapshot, "interrupts", ()) or ()
+        next_nodes = getattr(state_snapshot, "next", ()) or ()
+        return get_pending_approval_payload(interrupts, next_nodes)
+
+    async def _should_resume_thread(self, thread_id: str | None) -> bool:
+        state_snapshot = await self._get_thread_state_snapshot(thread_id)
+        if state_snapshot is None:
+            return False
+        return self._has_resumable_interrupt(state_snapshot)
+
+    async def get_pending_approval(self, thread_id: str | None) -> dict[str, Any] | None:
+        state_snapshot = await self._get_thread_state_snapshot(thread_id)
+        if state_snapshot is None:
+            return None
+        return self._get_pending_approval_from_snapshot(state_snapshot)
+
+    async def validate_approval_request(self, thread_id: str | None, interrupt_id: str) -> None:
+        if not thread_id:
+            raise ValueError("thread_id is required for approval actions.")
+        approval = await self.get_pending_approval(thread_id)
+        if approval is None:
+            raise ValueError("No pending approval found for this thread.")
+        if approval.get("interrupt_id") != interrupt_id:
+            raise ValueError("Approval request is stale. Please refresh and try again.")
+
+    async def _get_graph_input_with_plan(
+        self,
+        message: str,
+        thread_id: str | None,
+        *,
+        plan_id: int | None,
+        user_id: str | None = None,
+        attachment_text: str | None = None,
+        attachment_paths: list[str] | None = None,
+        approval: dict[str, Any] | None = None,
+    ):
+        state_snapshot = await self._get_thread_state_snapshot(thread_id)
+        if self._has_resumable_interrupt(state_snapshot):
+            if approval:
+                resume_payload = {
+                    "action": approval["action"],
+                    "interrupt_id": approval["interrupt_id"],
+                }
+                if approval.get("selected_artifact_types") is not None:
+                    resume_payload["selected_artifact_types"] = approval["selected_artifact_types"]
+                return Command(resume=resume_payload)
+            if attachment_text:
+                return Command(
+                    resume={
+                        "message": message,
+                        "attachment_text": attachment_text,
+                        "attachment_paths": attachment_paths,
+                    }
+                )
+            return Command(resume=message)
+
+        if approval:
+            raise ValueError("No pending interrupt found for approval request.")
+
+        graph_input: dict[str, Any] = {
+            "messages": build_input_messages(message, attachment_text, attachment_paths),
+        }
+        if plan_id is not None:
+            graph_input["plan_id"] = plan_id
+        if thread_id:
+            async with AsyncSessionLocal() as db:
+                current_artifacts = await artifact_service.list_latest_ready_current_artifacts_by_thread(
+                    db,
+                    thread_id=thread_id,
+                    user_id=int(user_id) if user_id is not None else None,
+                )
+            graph_input["artifact_catalog"] = [_artifact_catalog_entry(record) for record in current_artifacts]
+
+        existing_values = getattr(state_snapshot, "values", {}) or {}
+        if not existing_values:
+            graph_input["ppt_result"] = _default_subagent_result("ppt")
+            graph_input["lesson_plan_result"] = _default_subagent_result("docx")
+            graph_input["game_result"] = _default_subagent_result("html-game")
+        return graph_input
+
+    def _should_emit_text_chunk(
+        self,
+        metadata: dict[str, Any],
+        namespace: tuple[str, ...],
+    ) -> bool:
+        langgraph_node = metadata.get("langgraph_node")
+        _ = namespace
+        return langgraph_node in ROOT_STREAMING_NODES
+
+    async def _get_visible_thread_messages(self, thread_id: str) -> list[AnyMessage]:
+        state_snapshot = await self.streaming_graph.aget_state(get_thread_config(thread_id))
+        values = getattr(state_snapshot, "values", {}) or {}
+        messages = values.get("messages", []) or []
+        return [message for message in messages if isinstance(message, BaseMessage)]
+
+    def _log_context_compression_skip(
+        self,
+        *,
+        reason: str,
+        context: RunContext,
+        sink: ObservationSink,
+    ) -> None:
+        log_observation(
+            "context.compression.skipped",
+            context=context.with_agent("context_compression"),
+            sink=sink,
+            status="success",
+            fields={"reason": reason, "decision": "skip"},
+        )
+
+    async def _maybe_compress_thread_context(
+        self,
+        thread_id: str | None,
+        *,
+        context: RunContext,
+        sink: ObservationSink,
+        progress_reporter: ProgressReporter,
+    ) -> None:
+        if not thread_id:
+            self._log_context_compression_skip(
+                reason="no_thread",
+                context=context,
+                sink=sink,
+            )
+            return
+
+        state_snapshot = await self._get_thread_state_snapshot(thread_id)
+        if state_snapshot is None:
+            self._log_context_compression_skip(
+                reason="no_thread",
+                context=context,
+                sink=sink,
+            )
+            return
+        if self._has_resumable_interrupt(state_snapshot):
+            self._log_context_compression_skip(
+                reason="resumable_interrupt",
+                context=context,
+                sink=sink,
+            )
+            return
+
+        values = getattr(state_snapshot, "values", {}) or {}
+
+        def emit_context_compression_started(_plan: Any) -> None:
+            progress_reporter.emit(
+                "context_compression",
+                "running",
+                detail="正在整理长对话上下文",
+            )
+
+        result = await compress_state_messages(
+            values,
+            context=context,
+            sink=sink,
+            settings=CompressionSettings(),
+            on_compression_started=emit_context_compression_started,
+        )
+        if result.status == "skipped":
+            return
+
+        if result.status == "failed" or result.update is None:
+            progress_reporter.emit(
+                "context_compression",
+                "failed",
+                detail="上下文压缩失败，已保留原上下文",
+            )
+            return
+
+        try:
+            await self.streaming_graph.aupdate_state(
+                get_thread_config(
+                    thread_id,
+                    run_id=context.run_id,
+                    user_id=context.user_id,
+                    plan_id=context.plan_id,
+                    run_context=context,
+                    observation_sink=sink,
+                    progress_reporter=progress_reporter,
+                ),
+                result.update,
+            )
+        except Exception as exc:
+            log_observation(
+                "context.compression.failed",
+                context=context.with_agent("context_compression"),
+                sink=sink,
+                status="failed",
+                fields={
+                    "error_category": categorize_error(exc),
+                    "error_type": exc.__class__.__name__,
+                    "error_message": str(exc),
+                    "reason": "state_update_failed",
+                },
+            )
+            progress_reporter.emit(
+                "context_compression",
+                "failed",
+                detail="上下文压缩写入失败，已保留原上下文",
+            )
+            return
+        progress_reporter.emit(
+            "context_compression",
+            "success",
+            detail=(
+                f"已完成上下文压缩（约 {result.estimated_tokens_before} -> {result.estimated_tokens_after} tokens）"
+            ),
+        )
+
+    async def _generate_follow_up_suggestions(
+        self,
+        thread_id: str,
+        *,
+        run_context: RunContext | None = None,
+        observation_sink: ObservationSink | None = None,
+    ) -> list[str]:
+        messages = await self._get_visible_thread_messages(thread_id)
+        final_response_text = get_final_response_text(messages)
+        if not final_response_text:
+            return []
+
+        conversation_lines = _build_suggestion_conversation(messages)
+        if not conversation_lines:
+            return []
+
+        prompt_messages = [
+            SystemMessage(
+                content=(
+                    "我将提供一段AI助手与用户的对话。"
+                    "请你扮演用户，生成恰好 3 条最自然、最有价值的简短的对AI助手上一条消息的中文回复。"
+                    "请严格使用换行分隔每一条建议，每行只写一条。"
+                    "每条都必须是用户可以直接发送给 AI 的完整句子。"
+                    "要简洁、清晰、和刚刚的AI消息紧密相关。"
+                    "不要编号，不要解释，只返回 3 行纯文本。"
+                )
+            ),
+            HumanMessage(content=("请根据下面的对话生成 3 条继续追问：\n\n" + "\n".join(conversation_lines))),
+        ]
+
+        context = (
+            run_context or RunContext(run_id="suggestions", thread_id=thread_id, agent_name="suggestions")
+        ).with_agent("suggestions")
+        sink = observation_sink or get_observation_sink()
+        try:
+            suggestion_model = self.suggestion_generator or get_small_model()
+            result = await observe_llm_call(
+                "llm.call",
+                lambda: suggestion_model.ainvoke(prompt_messages),
+                context=context,
+                sink=sink,
+                model=suggestion_model,
+                messages=prompt_messages,
+                fields={"node": "follow_up_suggestions"},
+            )
+        except Exception as exc:
+            log_observation(
+                "suggestions.generation.failed",
+                context=context,
+                sink=sink,
+                status="failed",
+                fields={
+                    "error_category": categorize_error(exc),
+                    "error_type": exc.__class__.__name__,
+                    "error_message": str(exc),
+                },
+            )
+            return []
+
+        suggestions = _sanitize_suggestions(_split_suggestion_lines(_message_to_text(result).strip()))
+        if len(suggestions) < SUGGESTION_COUNT:
+            log_observation(
+                "suggestions.generation.discarded",
+                context=context,
+                sink=sink,
+                status="failed",
+                fields={"suggestion_count": len(suggestions)},
+            )
+            return []
+        return suggestions
+
+    def _artifact_agent_thread_id(self, thread_id: str, artifact_type: ArtifactType) -> str:
+        return f"{thread_id}--artifact-{artifact_type}"
+
+    def _artifact_run_id(self, run_id: str, artifact_type: ArtifactType) -> str:
+        return f"{run_id}-{artifact_type}"
+
+    async def _stream_artifact_agent_updates(
+        self,
+        agent_runnable: Any,
+        *,
+        prompt: str,
+        system_prompt: str,
+        agent_config: RunnableConfig,
+        emit_trace_entry: Callable[..., None],
+    ) -> dict[str, Any] | None:
+        last_ai_message: AIMessage | None = None
+
+        config_token = _ACTIVE_AGENT_CONFIG.set(agent_config)
+        try:
+            async for chunk in agent_runnable.astream(
+                {"messages": [{"role": "user", "content": prompt}]},
+                config=agent_config,
+                context=ArtifactAgentContext(system_prompt=system_prompt),
+                stream_mode="updates",
+                version="v2",
+            ):
+                if chunk.get("type") != "updates":
+                    continue
+
+                chunk_data = chunk.get("data")
+                if not isinstance(chunk_data, dict):
+                    continue
+
+                for step, data in chunk_data.items():
+                    if not isinstance(data, dict):
+                        continue
+
+                    raw_messages = data.get("messages") or []
+                    if step == "model":
+                        model_messages = [message for message in raw_messages if isinstance(message, AIMessage)]
+                        if not model_messages:
+                            continue
+
+                        last_ai_message = model_messages[-1]
+                        ai_text = _normalize_trace_content(_message_to_text(last_ai_message))
+                        if ai_text:
+                            emit_trace_entry(
+                                "ai_message",
+                                "AI 输出",
+                                content=ai_text,
+                            )
+
+                        for tool_call in last_ai_message.tool_calls or []:
+                            emit_trace_entry(
+                                "tool_call",
+                                _artifact_trace_tool_call_title(tool_call),
+                                content=_normalize_trace_content(tool_call.get("args")),
+                            )
+
+                    if step == "tools":
+                        tool_messages = [message for message in raw_messages if isinstance(message, ToolMessage)]
+                        for tool_message in tool_messages:
+                            emit_trace_entry(
+                                "tool_result",
+                                _artifact_trace_tool_result_title(tool_message),
+                                content=_normalize_trace_content(_message_to_text(tool_message)),
+                            )
+        finally:
+            _ACTIVE_AGENT_CONFIG.reset(config_token)
+
+        if last_ai_message is None:
+            return None
+        return {"messages": [last_ai_message]}
+
+    def _build_artifact_prompt(self, state: TeachingAssistantState, artifact_type: ArtifactType) -> str:
+        latest_user_messages = [
+            _message_to_text(message).strip()
+            for message in state.get("messages", [])
+            if isinstance(message, HumanMessage)
+        ]
+        latest_request = latest_user_messages[-1] if latest_user_messages else ""
+        teaching_design_plan = state.get("teaching_design_plan", "")
+        teaching_metadata = state.get("teaching_metadata")
+        rag_context = state.get("rag_context", "")
+        artifact_instruction = {
+            "ppt": (
+                "This branch is responsible only for the PPTX artifact; ignore requests for DOCX or HTML. "
+                "Generate a real `.pptx` teaching deck. "
+                "You must load and follow the `ppt-generator` skill, then write the final file to `AGENT_OUTPUT_DIR`."
+            ),
+            "docx": (
+                "This branch is responsible only for the DOCX artifact; ignore requests for PPTX or HTML. "
+                "Generate a real `.docx` lesson-plan document. "
+                "You must load and follow the `docx` skill, then write the final file to `AGENT_OUTPUT_DIR`."
+            ),
+            "html-game": (
+                "This branch is responsible only for the HTML artifact; ignore requests for PPTX or DOCX. "
+                "Generate a single runnable `.html` interactive activity or experiment page. "
+                "You must load and follow the `html-interactive` skill, then write the final file to `AGENT_OUTPUT_DIR`."
+            ),
+        }[artifact_type]
+
+        return (
+            f"{artifact_instruction}\n\n"
+            f"Latest user request:\n{latest_request}\n\n"
+            f"Teaching metadata:\n{teaching_metadata}\n\n"
+            f"Teaching design plan:\n{teaching_design_plan}\n\n"
+            f"Retrieved context:\n{rag_context}\n\n"
+            f"{ARTIFACT_EXECUTION_CONTRACT}\n\n"
+            "If required dependencies are missing, explain the missing dependency clearly. "
+            "Do not use shell to install anything."
+        )
+
+    def _build_revision_prompt(
+        self,
+        state: TeachingAssistantState,
+        artifact_type: ArtifactType,
+        *,
+        source_artifact: dict[str, Any],
+        agent_config: RunnableConfig,
+    ) -> str:
+        paths = get_workspace_paths(agent_config)
+        latest_request = (state.get("user_feedback") or "").strip() or self._build_artifact_prompt(state, artifact_type)
+        source_file = paths.workspace_root / ARTIFACT_SOURCE_FILENAMES[artifact_type]
+        unpacked_dir = paths.workspace_root / "source_unpacked"
+        summary_file = paths.workspace_root / "source_summary.json"
+
+        base_instruction = {
+            "ppt": (
+                "Revise the existing `.pptx` artifact instead of creating a deck from scratch. "
+                "Use the prepared source summary and unpacked Office XML as references. "
+                "Preserve unaffected slide structure as much as possible, then write the revised `.pptx` to `AGENT_OUTPUT_DIR`."
+            ),
+            "docx": (
+                "Revise the existing `.docx` artifact. "
+                "Use the unpacked Office XML under `source_unpacked/`, apply targeted edits, then pack a revised `.docx` into `AGENT_OUTPUT_DIR`. "
+                "Prefer precise text changes over rewriting the entire document."
+            ),
+            "html-game": (
+                "Revise the existing `.html` artifact directly. "
+                "Read the source file, apply targeted changes, and write the revised `.html` to `AGENT_OUTPUT_DIR`."
+            ),
+        }[artifact_type]
+
+        skill_hints = {
+            "ppt": (
+                "Load `ppt-generator`. If you need to inspect Office XML more deeply, you may also load `docx` "
+                "and use its `scripts/office/pack.py` or `scripts/office/validate.py` tooling through `run_skill_script`."
+            ),
+            "docx": (
+                "Load `docx` and use its office scripts when needed. "
+                "The source file is already unpacked, so you can edit the XML in place and repack it."
+            ),
+            "html-game": (
+                "Load `html-interactive`. Use `read_workspace_file` and `replace_workspace_text` for targeted updates whenever possible."
+            ),
+        }[artifact_type]
+
+        return (
+            f"{base_instruction}\n\n"
+            f"{skill_hints}\n\n"
+            f"Revision request:\n{latest_request}\n\n"
+            f"Source artifact metadata:\n{json.dumps(source_artifact, ensure_ascii=False, indent=2)}\n\n"
+            f"Prepared source file:\n{source_file}\n\n"
+            f"Prepared unpacked directory:\n{unpacked_dir}\n\n"
+            f"Prepared source summary:\n{summary_file}\n\n"
+            "Do not edit files in the database storage directory directly. Work only inside the agent workspace and write the final revised artifact into `AGENT_OUTPUT_DIR`."
+        )
+
+    def _extract_best_error(self, invoke_result: dict[str, Any] | None, exc: Exception | None = None) -> str:
+        if exc is not None:
+            return str(exc)
+        if invoke_result:
+            messages = invoke_result.get("messages", []) or []
+            final_text = get_final_response_text(messages)
+            if final_text:
+                return final_text
+        return "No artifact file was produced."
+
+    def _snapshot_generated_outputs(
+        self,
+        config: RunnableConfig,
+        artifact_type: ArtifactType,
+    ) -> dict[str, float]:
+        paths = get_workspace_paths(config)
+        allowed_extensions = ARTIFACT_ALLOWED_EXTENSIONS[artifact_type]
+        snapshots: dict[str, float] = {}
+        for root in (paths.output_root, paths.workspace_root):
+            for path in root.rglob("*"):
+                if path.is_file() and path.suffix.lower() in allowed_extensions:
+                    snapshots[str(path)] = path.stat().st_mtime
+        return snapshots
+
+    def _artifact_candidate_priority(self, paths: Any, path: Path) -> tuple[int, float]:
+        try:
+            path.relative_to(paths.output_root)
+            return (3, path.stat().st_mtime)
+        except ValueError:
+            pass
+
+        try:
+            relative_path = path.relative_to(paths.workspace_root)
+        except ValueError:
+            return (0, path.stat().st_mtime)
+
+        top_level_dir = relative_path.parts[0].lower() if relative_path.parts else ""
+        if top_level_dir in {"output", "outputs", "dist", "build"}:
+            return (2, path.stat().st_mtime)
+        return (1, path.stat().st_mtime)
+
+    def _find_generated_output(
+        self,
+        config: RunnableConfig,
+        artifact_type: ArtifactType,
+        *,
+        before_snapshot: dict[str, float] | None = None,
+    ) -> Path | None:
+        paths = get_workspace_paths(config)
+        after_snapshot = self._snapshot_generated_outputs(config, artifact_type)
+        candidates = [
+            Path(raw_path)
+            for raw_path, mtime in after_snapshot.items()
+            if before_snapshot is None or before_snapshot.get(raw_path) != mtime
+        ]
+
+        if not candidates:
+            candidates = [
+                Path(raw_path) for raw_path in after_snapshot if Path(raw_path).is_relative_to(paths.output_root)
+            ]
+        if not candidates:
+            return None
+        return max(
+            candidates,
+            key=lambda item: self._artifact_candidate_priority(paths, item),
+        )
+
+    def _build_missing_output_error(
+        self,
+        invoke_result: dict[str, Any] | None,
+        *,
+        artifact_type: ArtifactType,
+        config: RunnableConfig,
+    ) -> str:
+        paths = get_workspace_paths(config)
+        final_text = self._extract_best_error(invoke_result)
+        extension_hint = ", ".join(ARTIFACT_ALLOWED_EXTENSIONS[artifact_type])
+        return (
+            f"No generated artifact file was detected for {artifact_type}. "
+            f"Expected a newly created or updated {extension_hint} file, preferably under "
+            f"AGENT_OUTPUT_DIR ({paths.output_root}). Final agent message: {final_text}"
+        )
+
+    def _clear_workspace_for_job(self, agent_config: RunnableConfig) -> None:
+        paths = get_workspace_paths(agent_config)
+        for target in (paths.workspace_root, paths.output_root):
+            if not target.exists():
+                continue
+            for child in target.iterdir():
+                if child.is_dir():
+                    shutil.rmtree(child)
+                else:
+                    child.unlink()
+
+    def _extract_text_from_xml(self, xml_text: str) -> str:
+        text = re.sub(r"<[^>]+>", " ", xml_text)
+        text = re.sub(r"\s+", " ", text)
+        return text.strip()
+
+    def _prepare_revision_workspace(
+        self,
+        *,
+        artifact_type: ArtifactType,
+        source_artifact: dict[str, Any],
+        state: TeachingAssistantState,
+        agent_config: RunnableConfig,
+    ) -> None:
+        self._clear_workspace_for_job(agent_config)
+        paths = get_workspace_paths(agent_config)
+        workspace_source = paths.workspace_root / ARTIFACT_SOURCE_FILENAMES[artifact_type]
+        with artifact_service.materialize_artifact_payload(source_artifact) as source_path:
+            if not source_path.exists() or not source_path.is_file():
+                raise FileNotFoundError(f"Source artifact file not found: {source_path}")
+            shutil.copy2(source_path, workspace_source)
+
+        revision_request = {
+            "artifact_type": artifact_type,
+            "user_feedback": state.get("user_feedback"),
+            "feedback_type": state.get("feedback_type"),
+            "iteration_count": state.get("iteration_count"),
+        }
+        (paths.workspace_root / "revision_request.json").write_text(
+            json.dumps(revision_request, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        (paths.workspace_root / "source_artifact.json").write_text(
+            json.dumps(source_artifact, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+
+        if artifact_type in {"ppt", "docx"}:
+            unpacked_dir = paths.workspace_root / "source_unpacked"
+            unpacked_dir.mkdir(parents=True, exist_ok=True)
+            with zipfile.ZipFile(workspace_source, "r") as archive:
+                archive.extractall(unpacked_dir)
+
+            summary: dict[str, Any] = {
+                "source_file": workspace_source.name,
+                "unpacked_dir": "source_unpacked",
+                "entries": [],
+            }
+            for xml_file in sorted(unpacked_dir.rglob("*.xml")):
+                try:
+                    xml_text = xml_file.read_text(encoding="utf-8", errors="replace")
+                except OSError:
+                    continue
+                extracted_text = self._extract_text_from_xml(xml_text)
+                if not extracted_text:
+                    continue
+                summary["entries"].append(
+                    {
+                        "path": xml_file.relative_to(paths.workspace_root).as_posix(),
+                        "text": extracted_text[:2000],
+                    }
+                )
+            (paths.workspace_root / "source_summary.json").write_text(
+                json.dumps(summary, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+        elif artifact_type == "html-game":
+            html_text = workspace_source.read_text(encoding="utf-8")
+            (paths.workspace_root / "source_summary.json").write_text(
+                json.dumps(
+                    {
+                        "source_file": workspace_source.name,
+                        "preview": html_text[:4000],
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+
+    async def _run_artifact_job(
+        self,
+        *,
+        state: TeachingAssistantState,
+        config: RunnableConfig | None,
+        artifact_type: ArtifactType,
+        agent_runnable: Any,
+        mode: Literal["create", "revise"],
+    ) -> dict[str, Any]:
+        step_key = ARTIFACT_STEP_KEYS[artifact_type] if mode == "create" else ARTIFACT_REVISION_STEP_KEYS[artifact_type]
+        state_key = ARTIFACT_STATE_KEYS[artifact_type]
+        main_reporter = _get_configurable_value(config, "progress_reporter")
+        if isinstance(main_reporter, ProgressReporter):
+            action_text = "生成中" if mode == "create" else "修改中"
+            main_reporter.emit(step_key, "running", detail=f"{_artifact_display_name(artifact_type)}{action_text}")
+
+        thread_id = str(_get_configurable_value(config, "thread_id") or "").strip()
+        run_id = str(_get_configurable_value(config, "run_id") or "").strip()
+        user_id_raw = str(_get_configurable_value(config, "user_id") or "").strip()
+        plan_id = state.get("plan_id")
+        artifact_title = _artifact_display_name(artifact_type)
+        emitter = _get_artifact_event_emitter(config)
+        trace_event_emitter = _get_artifact_trace_event_emitter(config)
+
+        if not thread_id or not run_id or not user_id_raw or plan_id is None:
+            error_message = "Missing thread_id, run_id, user_id, or plan_id for artifact job."
+            if isinstance(main_reporter, ProgressReporter):
+                main_reporter.emit(step_key, "failed", detail=error_message)
+            return {state_key: _failed_subagent_result(artifact_type, error=error_message)}
+        try:
+            user_id_int = int(user_id_raw)
+        except ValueError:
+            error_message = "Invalid user_id for artifact job."
+            if isinstance(main_reporter, ProgressReporter):
+                main_reporter.emit(step_key, "failed", detail=error_message)
+            return {state_key: _failed_subagent_result(artifact_type, error=error_message)}
+
+        sub_run_id = self._artifact_run_id(run_id, artifact_type)
+        parent_context = _get_run_context(config, default_run_id=run_id or "adhoc")
+        observation_sink = _get_observation_sink(config)
+        span_event = "artifact.generate" if mode == "create" else "artifact.revise"
+        artifact_started_at = time.perf_counter()
+        workspace_backend = get_workspace_execution_backend()
+        artifact_context = RunContext(
+            run_id=sub_run_id,
+            thread_id=thread_id or parent_context.thread_id,
+            plan_id=int(plan_id),
+            user_id=user_id_raw or parent_context.user_id,
+            agent_name=f"artifact_{artifact_type}_agent",
+        )
+        log_observation(
+            span_event,
+            context=artifact_context,
+            sink=observation_sink,
+            status="running",
+            fields={
+                "artifact_type": artifact_type,
+                "source_artifact_id": None,
+                "workspace_backend": workspace_backend,
+            },
+        )
+        artifact_record: ArtifactFile | None = None
+        source_artifact: dict[str, Any] | None = None
+        trace_entry_index = 0
+
+        def emit_trace_entry(
+            kind: ArtifactTraceEntryKind,
+            title: str,
+            *,
+            content: Any | None = None,
+            status: str | None = None,
+        ) -> None:
+            nonlocal trace_entry_index
+            if trace_event_emitter is None:
+                return
+
+            trace_entry_index += 1
+            entry: dict[str, Any] = {
+                "entry_id": f"{sub_run_id}-trace-{trace_entry_index}",
+                "kind": kind,
+                "title": title,
+            }
+            normalized_content = _normalize_trace_content(content)
+            if normalized_content:
+                entry["content"] = normalized_content
+            if status:
+                entry["status"] = status
+
+            trace_event_emitter(
+                {
+                    "event": "artifact_trace",
+                    "data": {
+                        "run_id": run_id,
+                        "artifact_run_id": sub_run_id,
+                        "artifact_type": artifact_type,
+                        "artifact_title": artifact_title,
+                        "mode": mode,
+                        "entry": entry,
+                    },
+                }
+            )
+
+        try:
+            async with AsyncSessionLocal() as db:
+                if mode == "create":
+                    artifact_record = await artifact_service.create_running_artifact(
+                        db,
+                        plan_id=plan_id,
+                        thread_id=thread_id,
+                        artifact_type=artifact_type,
+                        run_id=sub_run_id,
+                        user_id=user_id_int,
+                        title=artifact_title,
+                    )
+                else:
+                    source_artifact = next(
+                        (
+                            item
+                            for item in (state.get("revision_source_artifacts") or [])
+                            if str(item.get("type") or "") == artifact_type
+                        ),
+                        None,
+                    )
+                    if source_artifact is None:
+                        raise RuntimeError(f"No source artifact was resolved for {artifact_type} revision.")
+                    source_record = await artifact_service.require_artifact_by_id(
+                        db,
+                        int(source_artifact["id"]),
+                        user_id=user_id_int,
+                    )
+                    artifact_record = await artifact_service.create_revision_artifact(
+                        db,
+                        source_artifact=source_record,
+                        run_id=sub_run_id,
+                        title=source_record.title,
+                    )
+                if emitter:
+                    emitter(
+                        {
+                            "event": "artifact",
+                            "data": {
+                                "run_id": run_id,
+                                "artifact": _artifact_payload(artifact_record),
+                            },
+                        }
+                    )
+
+            emit_trace_entry(
+                "status",
+                f"开始{'生成' if mode == 'create' else '修改'}{artifact_title}",
+                content=("正在准备工作区并启动产物 agent。" if mode == "revise" else "正在启动产物 agent。"),
+                status="running",
+            )
+
+            agent_config = get_thread_config(
+                self._artifact_agent_thread_id(thread_id, artifact_type),
+                run_id=sub_run_id,
+                user_id=user_id_raw,
+                plan_id=plan_id,
+                run_context=artifact_context,
+                observation_sink=observation_sink,
+            )
+            if mode == "revise":
+                if isinstance(main_reporter, ProgressReporter):
+                    main_reporter.emit("artifact_revision_prepare", "running", detail=f"准备{artifact_title}修改工作区")
+                assert source_artifact is not None
+                self._prepare_revision_workspace(
+                    artifact_type=artifact_type,
+                    source_artifact=source_artifact,
+                    state=state,
+                    agent_config=agent_config,
+                )
+                if isinstance(main_reporter, ProgressReporter):
+                    main_reporter.emit(
+                        "artifact_revision_prepare", "success", detail=f"{artifact_title}修改工作区已就绪"
+                    )
+            else:
+                self._clear_workspace_for_job(agent_config)
+            output_snapshot_before = self._snapshot_generated_outputs(
+                agent_config,
+                artifact_type,
+            )
+            prompt = (
+                self._build_artifact_prompt(state, artifact_type)
+                if mode == "create"
+                else self._build_revision_prompt(
+                    state,
+                    artifact_type,
+                    source_artifact=source_artifact or {},
+                    agent_config=agent_config,
+                )
+            )
+            invoke_result = await self._stream_artifact_agent_updates(
+                agent_runnable,
+                prompt=prompt,
+                system_prompt=self._render_artifact_system_prompt(state, artifact_type),
+                agent_config=agent_config,
+                emit_trace_entry=emit_trace_entry,
+            )
+            output_path = self._find_generated_output(
+                agent_config,
+                artifact_type,
+                before_snapshot=output_snapshot_before,
+            )
+
+            if output_path is None:
+                raise RuntimeError(
+                    self._build_missing_output_error(
+                        invoke_result,
+                        artifact_type=artifact_type,
+                        config=agent_config,
+                    )
+                )
+
+            if artifact_type == "ppt" and normalize_pptx_presentation_order(output_path):
+                log_observation(
+                    "artifact.ooxml.normalized",
+                    context=artifact_context,
+                    sink=observation_sink,
+                    status="success",
+                    fields={
+                        "artifact_type": artifact_type,
+                        "repair": "presentation_notes_master_order",
+                    },
+                )
+
+            async with AsyncSessionLocal() as db:
+                refreshed_record = await artifact_service.require_artifact_by_id(
+                    db,
+                    artifact_record.id,
+                    user_id=user_id_int,
+                )
+                refreshed_record = await artifact_service.mark_artifact_ready(
+                    db,
+                    refreshed_record,
+                    output_path=output_path,
+                    title=artifact_title,
+                    run_context=artifact_context,
+                    observation_sink=observation_sink,
+                )
+                if emitter:
+                    emitter(
+                        {
+                            "event": "artifact",
+                            "data": {
+                                "run_id": run_id,
+                                "artifact": _artifact_payload(refreshed_record),
+                            },
+                        }
+                    )
+
+            if isinstance(main_reporter, ProgressReporter):
+                detail = f"{artifact_title}已生成" if mode == "create" else f"{artifact_title}已更新"
+                main_reporter.emit(step_key, "success", detail=detail)
+            emit_trace_entry(
+                "status",
+                f"{artifact_title}{'生成完成' if mode == 'create' else '修改完成'}",
+                status="success",
+            )
+            record_metric(
+                span_event,
+                context=artifact_context,
+                sink=observation_sink,
+                status="success",
+                duration_ms=int((time.perf_counter() - artifact_started_at) * 1000),
+                fields={
+                    "artifact_type": artifact_type,
+                    "artifact_id": artifact_record.id,
+                    "source_artifact_id": source_artifact.get("id") if source_artifact else None,
+                    "revision_number": getattr(artifact_record, "revision_number", None),
+                    "workspace_backend": workspace_backend,
+                },
+            )
+            return {
+                state_key: _success_subagent_result(
+                    artifact_type,
+                    artifact_id=artifact_record.id,
+                    title=artifact_title,
+                )
+            }
+        except Exception as exc:
+            error_message = str(exc)
+            if artifact_record is not None:
+                async with AsyncSessionLocal() as db:
+                    refreshed_record = await artifact_service.require_artifact_by_id(
+                        db,
+                        artifact_record.id,
+                        user_id=user_id_int,
+                    )
+                    refreshed_record = await artifact_service.mark_artifact_failed(
+                        db,
+                        refreshed_record,
+                        error_message=error_message,
+                        run_context=artifact_context,
+                        observation_sink=observation_sink,
+                    )
+                    if emitter:
+                        emitter(
+                            {
+                                "event": "artifact",
+                                "data": {
+                                    "run_id": run_id,
+                                    "artifact": _artifact_payload(refreshed_record),
+                                },
+                            }
+                        )
+                    artifact_record = refreshed_record
+
+            if isinstance(main_reporter, ProgressReporter):
+                main_reporter.emit(step_key, "failed", detail=error_message)
+                if mode == "revise":
+                    main_reporter.emit("artifact_revision_prepare", "failed", detail=error_message)
+            emit_trace_entry(
+                "status",
+                f"{artifact_title}{'生成失败' if mode == 'create' else '修改失败'}",
+                content=error_message,
+                status="failed",
+            )
+            record_metric(
+                span_event,
+                context=artifact_context,
+                sink=observation_sink,
+                status="failed",
+                duration_ms=int((time.perf_counter() - artifact_started_at) * 1000),
+                fields={
+                    "artifact_type": artifact_type,
+                    "artifact_id": getattr(artifact_record, "id", None),
+                    "source_artifact_id": source_artifact.get("id") if source_artifact else None,
+                    "revision_number": getattr(artifact_record, "revision_number", None),
+                    "workspace_backend": workspace_backend,
+                    "error_category": "artifact_error",
+                    "error_type": exc.__class__.__name__,
+                    "error_message": error_message,
+                },
+            )
+            return {
+                state_key: _failed_subagent_result(
+                    artifact_type,
+                    artifact_id=getattr(artifact_record, "id", None),
+                    title=artifact_title,
+                    error=error_message,
+                )
+            }
+
+    async def ppt_generate_node(
+        self,
+        state: TeachingAssistantState,
+        config: Optional[RunnableConfig] = None,
+    ) -> dict[str, Any]:
+        return await self._run_artifact_job(
+            state=state,
+            config=config,
+            artifact_type="ppt",
+            agent_runnable=self._artifact_agent("ppt"),
+            mode="create",
+        )
+
+    async def docx_generate_node(
+        self,
+        state: TeachingAssistantState,
+        config: Optional[RunnableConfig] = None,
+    ) -> dict[str, Any]:
+        return await self._run_artifact_job(
+            state=state,
+            config=config,
+            artifact_type="docx",
+            agent_runnable=self._artifact_agent("docx"),
+            mode="create",
+        )
+
+    async def html_game_generate_node(
+        self,
+        state: TeachingAssistantState,
+        config: Optional[RunnableConfig] = None,
+    ) -> dict[str, Any]:
+        return await self._run_artifact_job(
+            state=state,
+            config=config,
+            artifact_type="html-game",
+            agent_runnable=self._artifact_agent("html-game"),
+            mode="create",
+        )
+
+    async def ppt_revision_node(
+        self,
+        state: TeachingAssistantState,
+        config: Optional[RunnableConfig] = None,
+    ) -> dict[str, Any]:
+        return await self._run_artifact_job(
+            state=state,
+            config=config,
+            artifact_type="ppt",
+            agent_runnable=self._artifact_agent("ppt"),
+            mode="revise",
+        )
+
+    async def docx_revision_node(
+        self,
+        state: TeachingAssistantState,
+        config: Optional[RunnableConfig] = None,
+    ) -> dict[str, Any]:
+        return await self._run_artifact_job(
+            state=state,
+            config=config,
+            artifact_type="docx",
+            agent_runnable=self._artifact_agent("docx"),
+            mode="revise",
+        )
+
+    async def html_game_revision_node(
+        self,
+        state: TeachingAssistantState,
+        config: Optional[RunnableConfig] = None,
+    ) -> dict[str, Any]:
+        return await self._run_artifact_job(
+            state=state,
+            config=config,
+            artifact_type="html-game",
+            agent_runnable=self._artifact_agent("html-game"),
+            mode="revise",
+        )
+
+    async def stream_agent_events(
+        self,
+        message: str,
+        thread_id: str | None,
+        *,
+        run_id: str,
+        user_id: str | None = None,
+        plan_id: int | None = None,
+        attachments: list[AttachmentFile] | None = None,
+        approval: dict[str, Any] | None = None,
+        model_envelope: dict | None = None,
+        run_context: RunContext | None = None,
+        observation_sink: ObservationSink | None = None,
+    ) -> AsyncIterator[dict[str, Any]]:
+        graph_thread_id = thread_id or run_id
+        context = (
+            run_context
+            or RunContext(
+                run_id=run_id,
+                thread_id=graph_thread_id,
+                plan_id=plan_id,
+                user_id=user_id,
+                agent_name="main_graph",
+            )
+        ).with_agent("main_graph")
+        sink = observation_sink or get_observation_sink()
+        lock = await self._get_thread_lock(graph_thread_id)
+        event_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+        loop = asyncio.get_running_loop()
+
+        def enqueue_event(event: dict[str, Any]) -> None:
+            try:
+                current_loop = asyncio.get_running_loop()
+            except RuntimeError:
+                current_loop = None
+
+            if current_loop is loop:
+                event_queue.put_nowait(event)
+                return
+
+            loop.call_soon_threadsafe(event_queue.put_nowait, event)
+
+        def emit_progress_event(event: dict[str, Any]) -> None:
+            enqueue_event(event)
+
+        def emit_artifact_event(event: dict[str, Any]) -> None:
+            enqueue_event(event)
+
+        def emit_artifact_trace_event(event: dict[str, Any]) -> None:
+            enqueue_event(event)
+
+        progress_tracker = ProgressTracker(run_id=run_id)
+        progress_reporter = ProgressReporter(
+            progress_tracker,
+            emit_event=emit_progress_event,
+        )
+        register_progress_reporter(run_id, progress_reporter)
+
+        async def produce_events() -> None:
+            nonlocal context
+            committed_text_emitted = False
+
+            def emit_root_text_event(value: str) -> None:
+                nonlocal committed_text_emitted
+                text = str(value or "")
+                if not text:
+                    return
+                committed_text_emitted = True
+                enqueue_event({"event": "token", "data": {"run_id": run_id, "text": text}})
+
+            try:
+                async with lock:
+                    values = await self.get_memory_reflection_checkpoint_values(graph_thread_id) or {}
+                    envelope = await self._persist_model_envelope(graph_thread_id, run_id, values, model_envelope)
+                    context = context.with_model_config(envelope.selected().fingerprint, envelope.workflow_id)
+                    log_observation(
+                        "model.config.admitted",
+                        context=context,
+                        sink=sink,
+                        status="success",
+                        fields={"legacy_snapshot_adopted": envelope.legacy_snapshot_adopted},
+                    )
+                    with use_snapshot(envelope.selected()):
+                        attachment_text: str | None = None
+                        attachment_paths = (
+                            [attachment.storage_path for attachment in attachments] if attachments else None
+                        )
+                        if attachments:
+                            attachment_text = await self.build_attachment_text(
+                                message,
+                                attachments,
+                                thread_id=graph_thread_id,
+                                run_id=run_id,
+                                user_id=user_id,
+                                plan_id=plan_id,
+                                run_context=context,
+                                observation_sink=sink,
+                                progress_reporter=progress_reporter,
+                            )
+
+                        graph_input = await self._get_graph_input_with_plan(
+                            message,
+                            graph_thread_id,
+                            plan_id=plan_id,
+                            attachment_text=attachment_text,
+                            attachment_paths=attachment_paths,
+                            approval=approval,
+                        )
+                        # Command updates preserve the existing interrupt and are checkpointed
+                        # before the resumed node. Admission was already persisted before attachments.
+                        if isinstance(graph_input, Command):
+                            graph_input = Command(resume=graph_input.resume, update=entry_update(envelope))
+                        else:
+                            graph_input = {**graph_input, **entry_update(envelope)}
+                        input_fields: dict[str, Any]
+                        if isinstance(graph_input, dict):
+                            input_fields = {
+                                "field_names": sorted(graph_input.keys()),
+                                "message_count": len(graph_input.get("messages", []) or []),
+                                "has_attachment_text": bool(attachment_text),
+                                "attachment_text_size": len(attachment_text or ""),
+                                "has_approval": bool(approval),
+                                "plan_id": plan_id,
+                            }
+                        else:
+                            input_fields = {
+                                "input_type": graph_input.__class__.__name__,
+                                "has_attachment_text": bool(attachment_text),
+                                "attachment_text_size": len(attachment_text or ""),
+                                "has_approval": bool(approval),
+                                "plan_id": plan_id,
+                            }
+                        log_observation(
+                            "graph.input",
+                            context=context,
+                            sink=sink,
+                            status="success",
+                            fields=input_fields,
+                        )
+                        received_text_chunk = False
+                        graph_stream_kwargs: dict[str, Any] = {
+                            "config": get_thread_config(
+                                graph_thread_id,
+                                run_id=run_id,
+                                user_id=user_id,
+                                plan_id=plan_id,
+                                run_context=context,
+                                observation_sink=sink,
+                                progress_reporter=progress_reporter,
+                                artifact_event_emitter=emit_artifact_event,
+                                artifact_trace_event_emitter=emit_artifact_trace_event,
+                                root_text_event_emitter=emit_root_text_event,
+                            ),
+                            "stream_mode": "messages",
+                            "subgraphs": True,
+                            "version": "v2",
+                        }
+                        if _call_accepts_kwarg(self.streaming_graph.astream, "context"):
+                            graph_stream_kwargs["context"] = {"user_id": user_id or DEFAULT_USER_ID}
+
+                        async for event in self.streaming_graph.astream(
+                            graph_input,
+                            **graph_stream_kwargs,
+                        ):
+                            if event.get("type") != "messages":
+                                continue
+
+                            chunk, metadata = event["data"]
+                            if not isinstance(chunk, (AIMessageChunk, AIMessage)):
+                                continue
+                            if not isinstance(metadata, dict):
+                                continue
+
+                            namespace = tuple(event.get("ns", ()) or ())
+                            if not self._should_emit_text_chunk(metadata, namespace):
+                                continue
+
+                            text = _message_to_text(chunk)
+                            if text:
+                                received_text_chunk = True
+                                await event_queue.put(
+                                    {
+                                        "event": "token",
+                                        "data": {
+                                            "run_id": run_id,
+                                            "text": text,
+                                        },
+                                    }
+                                )
+
+                        final_values = await self.get_memory_reflection_checkpoint_values(graph_thread_id) or {}
+                        with use_snapshot(final_values.get("model_config_snapshot") or envelope.selected()):
+                            context = context.with_model_config(
+                                current_snapshot().fingerprint, final_values.get("model_workflow_id")
+                            )
+                            pending_approval = await self.get_pending_approval(graph_thread_id)
+                            if pending_approval:
+                                approval_payload = dict(pending_approval)
+                                approval_payload["run_id"] = run_id
+                                await event_queue.put(
+                                    {
+                                        "event": "approval",
+                                        "data": approval_payload,
+                                    }
+                                )
+                                self._log_context_compression_skip(
+                                    reason="pending_approval",
+                                    context=context,
+                                    sink=sink,
+                                )
+
+                            received_text_chunk = received_text_chunk or committed_text_emitted
+                            if not received_text_chunk and not pending_approval:
+                                log_observation(
+                                    "graph.stream.no_text_chunks",
+                                    context=context,
+                                    sink=sink,
+                                    status="success",
+                                    fields={"pending_approval": False},
+                                )
+                            if graph_thread_id and not pending_approval:
+                                await self._maybe_compress_thread_context(
+                                    graph_thread_id,
+                                    context=context,
+                                    sink=sink,
+                                    progress_reporter=progress_reporter,
+                                )
+                            if graph_thread_id and received_text_chunk and not pending_approval:
+                                suggestions = await self._generate_follow_up_suggestions(
+                                    graph_thread_id,
+                                    run_context=context,
+                                    observation_sink=sink,
+                                )
+                                if suggestions:
+                                    await event_queue.put(
+                                        {
+                                            "event": "suggestions",
+                                            "data": {
+                                                "run_id": run_id,
+                                                "suggestions": suggestions,
+                                            },
+                                        }
+                                    )
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                log_observation(
+                    "graph.stream.failed",
+                    context=context,
+                    sink=sink,
+                    status="failed",
+                    fields={
+                        "error_category": categorize_error(exc),
+                        "error_type": exc.__class__.__name__,
+                        "error_message": str(exc),
+                    },
+                )
+                await event_queue.put(
+                    {
+                        "event": "error",
+                        "data": {
+                            "run_id": run_id,
+                            "message": safe_error(exc),
+                        },
+                    }
+                )
+            finally:
+                await event_queue.put({"event": "__end__", "data": None})
+
+        producer = asyncio.create_task(produce_events())
+
+        try:
+            while True:
+                item = await event_queue.get()
+                if item["event"] == "__end__":
+                    break
+                yield item
+        finally:
+            unregister_progress_reporter(run_id)
+            if not producer.done():
+                producer.cancel()
+            with suppress(asyncio.CancelledError):
+                await producer
+
+    async def close(self) -> None:
+        self._thread_locks.clear()
+        await close_agent_checkpointer()
+
+
+async def create_agent_runtime(
+    rag_runtime: RagRuntime,
+    skill_registry: SkillRegistry | None = None,
+    video_transcription_runtime: VideoTranscriptionRuntime | None = None,
+) -> AgentRuntime:
+    checkpointer = await init_agent_checkpointer()
+    memory_store = await init_memory_store()
+    if video_transcription_runtime is None:
+        raise RuntimeError("Video transcription runtime is required.")
+    return AgentRuntime(
+        checkpointer=checkpointer,
+        memory_store=memory_store,
+        rag_runtime=rag_runtime,
+        skill_registry=skill_registry or create_skill_registry(),
+        video_transcription_runtime=video_transcription_runtime,
+    )
+
+
+def get_agent_runtime(request: Request) -> AgentRuntime:
+    runtime = getattr(request.app.state, "agent_runtime", None)
+    if runtime is None:
+        raise RuntimeError("Agent runtime is not initialized.")
+    return runtime

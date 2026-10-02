@@ -1,0 +1,35 @@
+{
+  "candidates": [
+    {
+      "content": {
+        "role": "model",
+        "parts": [
+          {
+            "text": "private fixture reasoning",
+            "thought": true
+          },
+          {
+            "text": "Visible"
+          },
+          {
+            "functionCall": {
+              "name": "lookup",
+              "args": {
+                "topic": "math"
+              }
+            },
+            "thoughtSignature": "Zml4dHVyZS1zaWduYXR1cmU="
+          }
+        ]
+      },
+      "finishReason": "STOP",
+      "index": 0
+    }
+  ],
+  "usageMetadata": {
+    "promptTokenCount": 10,
+    "candidatesTokenCount": 4,
+    "totalTokenCount": 14
+  },
+  "modelVersion": "fixture-model"
+}

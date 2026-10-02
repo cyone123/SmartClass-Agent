@@ -4,7 +4,7 @@
 
 SmartClass Agent：面向教师的多模态教学智能体。后端用 LangGraph 编排「记忆加载 → 意图识别 → 教学要素抽取 → RAG 检索 → 教学设计 → 产物生成/修改」主流程，产出 PPTX / DOCX / 单文件 HTML 互动内容；前端是 Vue 3 三栏工作台，通过 SSE 消费流式事件。
 
-**本仓库是 super-repo，`backend/`、`frontend/`、`landing-page/` 都是 git 子模块。** 改动子模块内代码要先在子模块目录里提交，再回根仓库提交指针更新；`git status` 在根目录只会显示子模块的 dirty 状态。克隆用 `git clone --recurse-submodules`，已克隆则 `git submodule update --init --recursive`。
+**本仓库是 monorepo，`backend/`、`frontend/`、`landing-page/` 都是主仓库直接跟踪的普通目录。** 所有改动在根仓库统一查看、提交。GitHub Actions 统一位于根目录 `.github/workflows/`，各应用依赖、锁文件仍独立管理。
 
 ## 常用命令
 

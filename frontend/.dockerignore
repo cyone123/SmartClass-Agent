@@ -1,0 +1,17 @@
+.git
+node_modules
+dist
+dist-ssr
+coverage
+.vscode
+.idea
+*.log
+*.local
+.env
+.env.*
+__screenshots__
+cypress/videos
+cypress/screenshots
+*.timestamp-*-*.mjs
+*.tsbuildinfo
+.eslintcache
