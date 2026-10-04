@@ -666,7 +666,10 @@ def test_old_snapshot_fingerprint_still_restores():
 
     snapshot = config("openai_chat").model_dump(mode="json")
     for profile in snapshot["models"].values():
+        profile["capabilities"].pop("verification")
         profile["parameters"].pop("thinking_budget")
+        profile["parameters"].pop("reasoning_effort")
+        profile["parameters"].pop("provider_routing")
         profile["parameters"].pop("structured_method")
     original = {k: v for k, v in snapshot.items() if k not in {"fingerprint", "rules_version"}}
     snapshot["fingerprint"] = (

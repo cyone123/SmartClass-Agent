@@ -227,6 +227,9 @@ MODEL=your-model-name
 API_KEY=your-api-key
 BASE_URL=your-base-url
 
+# 可选：使用版本化多提供商配置（相对仓库根目录）
+# MODEL_CONFIG_PATH=model-config.example.yaml
+
 # JWT 密钥（生产环境必须修改）
 JWT_SECRET_KEY=your-secret-key-change-in-production
 
@@ -263,6 +266,10 @@ python run_server.py
 ```
 
 后端将运行在 `http://localhost:8000`
+
+模型运行时支持 OpenAI Chat、Anthropic Messages 与 Gemini Developer API，并提供
+OpenAI、Anthropic、Gemini、OpenRouter、DeepSeek、智谱和 custom 预设。生产配置、角色继承、
+凭据轮换及发布/回滚规则见 [多提供商模型运行时](docs/model-provider-runtime.md)；配置文件修改后必须重启后端。
 
 ### 3. 前端设置
 
@@ -313,6 +320,10 @@ docker compose --env-file .env.docker up -d --build
 # 停止服务
 docker compose --env-file .env.docker down
 ```
+
+若使用版本化 YAML，在 `.env.docker` 中设置
+`MODEL_CONFIG_PATH=/app/config/model-config.yaml`。Compose 会把根目录
+`model-config.example.yaml` 只读挂载到该位置；生产环境应将挂载源替换为受控配置文件。
 
 **服务访问：**
 - 前端：`http://localhost:8080`

@@ -123,8 +123,10 @@ python -m tests.benchmarks.artifact_generation `
   --promote-baseline artifact-generation-YYYY-MM-DD
 ```
 
-通过 DeepSeek 官方 API 执行工具型 Agent 时，可保持模型默认思考模式；正式基线会把该状态记为
-`thinking_mode: null`。只有在目标兼容接口明确要求时，才显式设置：
+通过 DeepSeek 官方 API 执行工具型 Agent 时，可保持模型默认思考模式。正式基线从实际解析的
+角色快照记录 `roles.<role>.thinking`，并同时记录 provider、protocol、model、结构化策略、
+配置/能力规则版本、集成版本、fallback、路由策略和实际/未知上游。只有在目标兼容接口明确要求时，
+才显式设置：
 
 ```powershell
 $env:MODEL_THINKING_MODE = "disabled"
@@ -144,7 +146,8 @@ JavaScript 语法及交互结构校验；报告必须明确这不包含 Office �
 
 - 使用哪个 Git commit、哪一版用例集与数据集 SHA-256。
 - 运行模式是 `deterministic`、`smoke` 还是 `model-eval`。
-- 模型 provider、模型名和非敏感采样参数；确定性实验应留空。
+- 每个实际调用角色的 provider、protocol、模型名、thinking/路由策略、配置和集成版本，以及
+  fallback 和实际/未知上游；确定性实验应留空。
 - OS、Python 版本、关键功能开关和执行命令。
 - 样本量、通过率、错误率、平均分及分类指标。
 - 实验限制，例如 Fake Model 结果不能代表真实模型延迟或质量。
@@ -171,3 +174,6 @@ JavaScript 语法及交互结构校验；报告必须明确这不包含 Office �
 - 单个用户、thread、plan 或 run 的敏感上下文。
 
 正式报告只允许使用聚合字段 allowlist。发现敏感内容时，必须删除该 baseline、修复脱敏测试后重新晋升。
+模型摘要 allowlist 仅允许上述稳定身份/策略字段；endpoint、credential reference、请求 header、
+prompt、completion 和 provider-private reasoning 一律剔除。thinking 或 provider routing 不同的运行
+必须作为不同配置证据，不能合并统计。

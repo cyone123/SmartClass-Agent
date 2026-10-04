@@ -7,9 +7,14 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from app.core.model_access.config_repository import EnvConfigRepository, FileConfigRepository, resolve
+from app.core.model_access.config_repository import (
+    EnvConfigRepository,
+    FileConfigRepository,
+    InMemoryConfigRepository,
+    resolve,
+)
 from app.core.model_access.factory import ModelFactory, current_snapshot, initialize, shutdown, use_snapshot
-from app.core.model_access.schemas import ConfigError, Configuration, restore_snapshot
+from app.core.model_access.schemas import ConfigError, Configuration, ensure_snapshot_protocols, restore_snapshot
 from app.core.model_access.secrets import SecretResolver
 
 
@@ -188,6 +193,47 @@ def test_startup_freezes_config_and_context_isolated(monkeypatch):
         assert current_snapshot().fingerprint == newer.fingerprint
     assert current_snapshot().fingerprint == snapshot.fingerprint
     asyncio.run(shutdown())
+
+
+def test_in_memory_repository_is_storage_agnostic_and_returns_isolated_snapshots():
+    snapshot = EnvConfigRepository(environment()).load()
+    repository = InMemoryConfigRepository(snapshot)
+
+    first = repository.load()
+    first.roles["main"] = first.roles["small"]
+    second = repository.load()
+
+    assert second.fingerprint == snapshot.fingerprint
+    assert second.roles["main"].model == snapshot.roles["main"].model
+    factory = ModelFactory(SecretResolver(environment()))
+    assert factory.get("main", snapshot=second).model_name == "main-a"
+    asyncio.run(factory.close())
+
+
+def test_legacy_runtime_preflight_rejects_new_protocol_snapshot():
+    config = Configuration.model_validate(
+        {
+            "connections": {
+                "native": {
+                    "preset": "anthropic",
+                    "protocol": "anthropic_messages",
+                    "credential": "env:ANTHROPIC_API_KEY",
+                }
+            },
+            "models": {
+                "native": {
+                    "connection": "native",
+                    "model_id": "claude-test",
+                    "capabilities": {"text": True, "streaming": True, "tools": True, "tool_choice": True},
+                }
+            },
+            "roles": {role: {"model": "native"} for role in ("main", "structured", "small", "memory")},
+        }
+    )
+    snapshot = resolve(config, {"ANTHROPIC_API_KEY": "test"})
+
+    with pytest.raises(ConfigError, match="anthropic_messages"):
+        ensure_snapshot_protocols(snapshot, frozenset({"openai_chat"}))
 
 
 def test_file_inheritance_cannot_reach_legacy_identity(tmp_path):

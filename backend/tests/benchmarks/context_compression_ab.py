@@ -27,7 +27,9 @@ from app.core.context_compression import (
     message_to_text,
 )
 from app.core.llm import get_context_compression_llm
+from app.core.model_access.factory import current_snapshot
 from app.core.observability import ObservationEvent, RunContext
+from tests.evals.manifest import model_summary_from_snapshot, sanitize_model_summary
 
 BENCHMARK_SCHEMA_VERSION = "1.0"
 DEFAULT_TURNS = (30, 50, 100)
@@ -432,7 +434,7 @@ def aggregate_report(
     controls: dict[int, dict[str, Any]],
     treatments: Sequence[dict[int, dict[str, Any]]],
     settings: CompressionSettings,
-    model_name: str,
+    model: dict[str, Any],
     started_at: datetime,
     duration_seconds: float,
 ) -> dict[str, Any]:
@@ -556,7 +558,7 @@ def aggregate_report(
             "main_agent_responses": "deterministic fixtures",
         },
         "settings": asdict(settings),
-        "model": {"name": model_name, "provider": "dashscope"},
+        "model": sanitize_model_summary(model),
         "token_measurement": {
             "main_prompt": "production estimate_message_tokens fallback (characters / 4)",
             "compression_overhead": "same estimator for prompt and compressed-message size",
@@ -645,7 +647,7 @@ def promote_baseline(
         "duration_seconds": report["duration_seconds"],
         "sample_definition": report["sample_definition"],
         "settings": report["settings"],
-        "model": report["model"],
+        "model": sanitize_model_summary(report["model"]),
         "token_measurement": report["token_measurement"],
         "scenarios": report["scenarios"],
         "latency_overall": report["latency_overall"],
@@ -720,7 +722,7 @@ def promote_baseline(
 
 - Baseline：`{baseline_id}`
 - 场景：固定合成长对话，A 组关闭压缩，B 组开启生产压缩入口
-- 模型：`{report["model"]["name"]}`（仅 B 组摘要调用）
+- 模型：`{(report["model"].get("roles") or {}).get("compression", {}).get("model", "unknown")}`（仅 B 组摘要调用）
 - 配置：阈值 {report["settings"]["trigger_tokens"]}，保留近期 {report["settings"]["keep_recent_turns"]} 轮
 - 重复次数：B 组 {report["sample_definition"]["treatment_repeats"]} 次
 - 压缩尝试：{report["latency_overall"]["compression_attempts"]} 次，失败 {report["latency_overall"]["compression_failures"]} 次
@@ -779,7 +781,10 @@ async def run_benchmark(args: argparse.Namespace) -> tuple[dict[str, Any], Path]
         controls=control,
         treatments=treatments,
         settings=settings,
-        model_name=str(getattr(model, "model_name", "unknown")),
+        model=model_summary_from_snapshot(
+            current_snapshot(),
+            {"compression": dict(getattr(model, "metadata", {}) or {})},
+        ),
         started_at=started_at,
         duration_seconds=time.perf_counter() - started,
     )

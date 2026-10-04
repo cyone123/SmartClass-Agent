@@ -1,5 +1,8 @@
 # MODEL_CONFIG_PATH=model-config.example.yaml (relative to repository root).
 # Loading is offline. Supply API_KEY only at startup/invocation. Restart to reload.
+# Credentials are env:NAME references. Never put a key or Authorization header here.
+# Other built-in presets: anthropic/anthropic_messages, gemini/google_genai,
+# openrouter/openai_chat, deepseek/openai_chat, zhipu/openai_chat, and custom.
 version: 1
 connections:
   primary:
@@ -16,6 +19,7 @@ models:
       tool_choice: true
       streaming: true
       source: declared
+      verification: declared
 roles:
   main: {model: teaching}
   structured: {inherit: main}

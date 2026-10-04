@@ -45,24 +45,24 @@
 
 依赖阶段 3。提供商仍使用明确协议，不根据模型名称改变连接。对应 model-provider-configuration 与 multi-protocol-model-runtime。
 
-- [ ] 4.1 完成 OpenRouter 预设的端点、credential schema、reasoning/provider 参数和 require_parameters 策略；验证 anthropic/deepseek 前缀模型仍走选定协议，配置路由 fallback 与实际/未知上游记录正确。
-- [ ] 4.2 完成 DeepSeek 预设并用固定集成版本验证 reasoning_content 完整往返，依据结果选择 ChatDeepSeek 或兼容实现；用工具多轮 fixture 验证保留 legacy thinking 关闭策略和仅开启受支持模式。
-- [ ] 4.3 完成智谱国内标准 API 预设及 GLM 参数/能力规则；验证 endpoint、thinking/工具参数组合及模型 ID 自定义，禁止静默切换海外或 Coding 端点。
-- [ ] 4.4 完成全部预设的公开配置 schema、可覆盖端点与模型 ID、多连接支持；验证能力来源/版本、声明与实测状态区分，以及自定义声明不能突破适配器硬限制。
-- [ ] 4.5 建立与主评估 YAML 集分离的显式真实模型 smoke 入口和脱敏结果格式；验证逐 provider/model/protocol/capability 的通过、失败、未验证状态以及缺凭据不会计为通过。
+- [x] 4.1 完成 OpenRouter 预设的端点、credential schema、reasoning/provider 参数和 require_parameters 策略；验证 anthropic/deepseek 前缀模型仍走选定协议，配置路由 fallback 与实际/未知上游记录正确。
+- [x] 4.2 完成 DeepSeek 预设并用固定集成版本验证 reasoning_content 完整往返，依据结果选择 ChatDeepSeek 或兼容实现；用工具多轮 fixture 验证保留 legacy thinking 关闭策略和仅开启受支持模式。
+- [x] 4.3 完成智谱国内标准 API 预设及 GLM 参数/能力规则；验证 endpoint、thinking/工具参数组合及模型 ID 自定义，禁止静默切换海外或 Coding 端点。
+- [x] 4.4 完成全部预设的公开配置 schema、可覆盖端点与模型 ID、多连接支持；验证能力来源/版本、声明与实测状态区分，以及自定义声明不能突破适配器硬限制。
+- [x] 4.5 建立与主评估 YAML 集分离的显式真实模型 smoke 入口和脱敏结果格式；验证逐 provider/model/protocol/capability 的通过、失败、未验证状态以及缺凭据不会计为通过。
 - [ ] 4.6 完成阶段 4 门禁：执行 OpenRouter、DeepSeek、智谱的文本/stream/工具闭环 smoke 和各自声明的 structured/thinking/vision 检查；交付带日期、模型和依赖版本的兼容矩阵，不以另一条路由的结果替代验证。
 
 ## 5. 业务回归、证据与发布
 
 依赖阶段 4。对应 evaluation-harness-integrity 以及全部跨能力验收；本期完成条件不包含未来配置管理页面/API。
 
-- [ ] 5.1 修改 eval manifest 和 benchmark 模型摘要以使用实际配置快照/调用元数据；验证多角色 provider/protocol、thinking、配置/集成版本、fallback 与实际/未知上游记录，并移除硬编码 provider 推断。
-- [ ] 5.2 更新报告 schema 2.0 兼容扩展与 benchmark 脱敏 allowlist；运行旧报告兼容、敏感字段剔除和 fail-closed 回归门禁测试，证明不同 thinking/路由条件不会当作同一配置合并。
-- [ ] 5.3 补充跨层业务回归：聊天、教学要素/计划确认与恢复、三类产物 fan-out 和修改、记忆反思、压缩后继续；验证每类流程使用指定角色且不绕过审批、workspace 或 StorageService。
-- [ ] 5.4 使用可替换内存配置仓库验证未来存储扩展接口，确认角色调用方不依赖 File/Env；交付未来 Database/Secret/管理 API 的接口说明与公开 DTO 示例，不创建管理 API 或前端页面。
-- [ ] 5.5 更新根目录 env/YAML 示例、Compose 只读配置挂载和 README；验证 Windows 本地加载与容器配置解析，并写明部分 legacy 配置迁移、重启生效、凭据轮换和可选角色行为。
-- [ ] 5.6 交付发布/回滚操作文档并演练快照兼容路径；验证旧记录迁移、新协议待审批任务不能由旧程序直接恢复，以及移除凭据时明确失败而非切换账号。
-- [ ] 5.7 运行后端 `python -m pytest -q`、`python -m ruff check app tests`、`python -m ruff format --check app tests` 与 `python -m tests.evals.cli validate-suite --expected-count 24`，记录全部结果；在线/integration 验证显式单独运行，不将默认 pytest 当作真实协议证明。
-- [ ] 5.8 汇总真实 smoke 和业务评估验收证据，保留 ERROR/FAILED、pass_rate/avg_score 与 deterministic/live/mixed 区分；仅在报告通过现有门禁时执行 baseline 晋升，未验证必需能力不得标记整个变更完成。
+- [x] 5.1 修改 eval manifest 和 benchmark 模型摘要以使用实际配置快照/调用元数据；验证多角色 provider/protocol、thinking、配置/集成版本、fallback 与实际/未知上游记录，并移除硬编码 provider 推断。
+- [x] 5.2 更新报告 schema 2.0 兼容扩展与 benchmark 脱敏 allowlist；运行旧报告兼容、敏感字段剔除和 fail-closed 回归门禁测试，证明不同 thinking/路由条件不会当作同一配置合并。
+- [x] 5.3 补充跨层业务回归：聊天、教学要素/计划确认与恢复、三类产物 fan-out 和修改、记忆反思、压缩后继续；验证每类流程使用指定角色且不绕过审批、workspace 或 StorageService。
+- [x] 5.4 使用可替换内存配置仓库验证未来存储扩展接口，确认角色调用方不依赖 File/Env；交付未来 Database/Secret/管理 API 的接口说明与公开 DTO 示例，不创建管理 API 或前端页面。
+- [x] 5.5 更新根目录 env/YAML 示例、Compose 只读配置挂载和 README；验证 Windows 本地加载与容器配置解析，并写明部分 legacy 配置迁移、重启生效、凭据轮换和可选角色行为。
+- [x] 5.6 交付发布/回滚操作文档并演练快照兼容路径；验证旧记录迁移、新协议待审批任务不能由旧程序直接恢复，以及移除凭据时明确失败而非切换账号。
+- [x] 5.7 运行后端 `python -m pytest -q`、`python -m ruff check app tests`、`python -m ruff format --check app tests` 与 `python -m tests.evals.cli validate-suite --expected-count 24`，记录全部结果；在线/integration 验证显式单独运行，不将默认 pytest 当作真实协议证明。
+- [x] 5.8 汇总真实 smoke 和业务评估验收证据，保留 ERROR/FAILED、pass_rate/avg_score 与 deterministic/live/mixed 区分；仅在报告通过现有门禁时执行 baseline 晋升，未验证必需能力不得标记整个变更完成。
 
 未来独立变更：数据库配置仓库、密钥加密与权限、草稿/测试/发布管理 API、前端设置页、端点访问控制、配置审计和引用删除策略。上述能力仅在本期设计中保留接口，不属于本任务清单。
