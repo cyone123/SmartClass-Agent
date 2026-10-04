@@ -16,12 +16,12 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Sequence
-from urllib.parse import urlparse
 
 import yaml
 from dotenv import dotenv_values
 
 from tests.benchmarks.artifact_validation import ArtifactType, ValidationResult, validate_artifact
+from tests.evals.manifest import sanitize_model_summary
 
 SCHEMA_VERSION = "1.0"
 ARTIFACT_TYPES: tuple[ArtifactType, ...] = ("ppt", "docx", "html-game")
@@ -616,17 +616,6 @@ def aggregate_report(report: dict[str, Any], *, expected_attempts: int) -> dict[
     }
 
 
-def _provider_name(base_url: str | None) -> str:
-    hostname = (urlparse(base_url or "").hostname or "").casefold()
-    if "dashscope" in hostname:
-        return "dashscope"
-    if "openrouter" in hostname:
-        return "openrouter"
-    if "openai" in hostname:
-        return "openai"
-    return "openai-compatible"
-
-
 def write_raw_report(report: dict[str, Any], path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -700,6 +689,7 @@ def promote_baseline(report: dict[str, Any], *, baseline_id: str, command: str) 
             "aggregate",
         )
     }
+    public_summary["model"] = sanitize_model_summary(report.get("model"))
     (target / "summary.json").write_text(json.dumps(public_summary, ensure_ascii=False, indent=2), encoding="utf-8")
     commit, dirty = _git_metadata()
     manifest = {
@@ -744,7 +734,7 @@ def promote_baseline(report: dict[str, Any], *, baseline_id: str, command: str) 
 
 - Baseline：`{baseline_id}`
 - 样本：5 个固定教学场景 × 2 次重复 × 3 类产物 = 30 次生成
-- 模型：`{report["model"]["name"]}`
+- 模型：`{(report["model"].get("roles") or {}).get("main", {}).get("model", "unknown")}`
 - Workspace：`{report["runtime"]["workspace_backend"]}`
 - Storage：`{report["runtime"]["storage_backend"]}`
 - 实验完整性门禁：{"通过" if aggregate["evidence_gate_passed"] else "未通过"}
@@ -772,8 +762,10 @@ async def run_experiment(args: argparse.Namespace) -> tuple[dict[str, Any], Path
     from app.config import get_storage_backend, get_workspace_execution_backend
     from app.core.agent import AgentRuntime
     from app.core.llm import get_model
+    from app.core.model_access.factory import current_snapshot
     from app.core.skills import create_skill_registry
     from app.dependencies.db import close_db_resources
+    from tests.evals.manifest import model_summary_from_snapshot
 
     all_cases = load_cases()
     selected_cases = all_cases[: PHASE_CASE_COUNTS[args.phase]]
@@ -801,11 +793,10 @@ async def run_experiment(args: argparse.Namespace) -> tuple[dict[str, Any], Path
             "dataset_fingerprint": cases_fingerprint(),
             "synthetic_inputs": True,
         },
-        "model": {
-            "name": str(getattr(model, "model_name", "unknown")),
-            "provider": _provider_name(str(getattr(model, "openai_api_base", "") or "")),
-            "thinking_mode": os.getenv("MODEL_THINKING_MODE") or None,
-        },
+        "model": model_summary_from_snapshot(
+            current_snapshot(),
+            {"main": dict(getattr(model, "metadata", {}) or {})},
+        ),
         "runtime": {
             "workspace_backend": get_workspace_execution_backend(),
             "storage_backend": get_storage_backend(),

@@ -93,7 +93,12 @@ class ModelFactory:
 
         model.metadata = {
             **(model.metadata or {}),
+            "smartclass_provider": connection.preset,
             "smartclass_protocol": connection.protocol,
+            "smartclass_model_id": profile.model_id,
+            "smartclass_configuration_version": snapshot.fingerprint,
+            "smartclass_capability_rules_version": snapshot.rules_version,
+            "smartclass_actual_upstream": "unknown",
             "smartclass_capabilities": profile.capabilities.model_dump(),
             "smartclass_structured_method": profile.parameters.structured_method,
         }

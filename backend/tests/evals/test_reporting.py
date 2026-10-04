@@ -28,6 +28,22 @@ def test_summary_uses_aggregate_allowlist() -> None:
                 "D:\\Learn\\langchain\\demo\\backend\\storage\\private.docx"
             ),
             "results": [{"actual_output": {"attachment": "PRIVATE ATTACHMENT"}}],
+            "model": {
+                "configuration_version": "v1:safe",
+                "roles": {
+                    "main": {
+                        "provider": "openrouter",
+                        "protocol": "openai_chat",
+                        "model": "vendor/model",
+                        "thinking": "on",
+                        "actual_upstream": "unknown",
+                        "provider_routing": {"allow_fallbacks": False, "require_parameters": True},
+                        "endpoint": "https://private.example/v1",
+                        "credential": "env:PRIVATE_KEY",
+                        "prompt": "PRIVATE MODEL PROMPT",
+                    }
+                },
+            },
         }
     )
     serialized = json.dumps(build_sanitized_summary(raw), ensure_ascii=False)
@@ -41,8 +57,15 @@ def test_summary_uses_aggregate_allowlist() -> None:
         "X-Amz-Signature",
         "users/1/private.docx",
         "D:\\Learn",
+        "private.example",
+        "PRIVATE_KEY",
+        "PRIVATE MODEL PROMPT",
     ):
         assert forbidden not in serialized
+    model = build_sanitized_summary(raw)["model"]
+    assert model["configuration_version"] == "v1:safe"
+    assert model["roles"]["main"]["thinking"] == "on"
+    assert model["roles"]["main"]["provider_routing"]["allow_fallbacks"] is False
 
 
 def test_promote_baseline_writes_three_safe_files(tmp_path: Path) -> None:

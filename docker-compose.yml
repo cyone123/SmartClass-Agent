@@ -36,6 +36,7 @@ services:
       MINIO_SECURE: "false"
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318/v1/traces
       PROMETHEUS_METRICS_PATH: ${PROMETHEUS_METRICS_PATH:-/metrics}
+      MODEL_CONFIG_PATH: ${MODEL_CONFIG_PATH:-}
     depends_on:
       postgres:
         condition: service_healthy
@@ -49,6 +50,7 @@ services:
         condition: service_started
     volumes:
       - backend_storage:/app/storage
+      - ./model-config.example.yaml:/app/config/model-config.yaml:ro
     ports:
       - "${DEBUG_BIND:-127.0.0.1}:${BACKEND_PORT:-8000}:8000"
     healthcheck:

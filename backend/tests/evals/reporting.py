@@ -11,6 +11,7 @@ import yaml
 
 from app.core.observability import sanitize_observation_fields
 from tests.evals.check_regression import check_regression, is_legacy_report, load_eval_result
+from tests.evals.manifest import sanitize_model_summary
 
 BASELINE_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]{1,63}$")
 
@@ -53,11 +54,7 @@ def build_sanitized_summary(report: dict[str, Any]) -> dict[str, Any]:
         "git_commit": report.get("git_commit", "unknown"),
         "repository_dirty": bool(report.get("repository_dirty", False)),
         "source_fingerprint": report.get("source_fingerprint", ""),
-        "model": {
-            key: value
-            for key, value in (report.get("model") or {}).items()
-            if key in {"provider", "model", "models", "temperature", "top_p", "max_tokens", "judge_model"}
-        },
+        "model": sanitize_model_summary(report.get("model")),
         "environment": safe_environment,
         "execution_time": float(report.get("execution_time", 0.0)),
         "timestamp": report.get("timestamp"),

@@ -1,0 +1,135 @@
+{
+  "schema": "smartclass-provider-smoke-v1",
+  "run_mode": "live-provider-smoke",
+  "generated_at": "2026-09-21T03:18:04.936823+00:00",
+  "dependencies": {
+    "langchain": "1.2.15",
+    "langchain-core": "1.2.28",
+    "langchain-openai": "1.1.11",
+    "openai": "2.28.0"
+  },
+  "results": [
+    {
+      "provider": "openrouter",
+      "model": "unconfigured",
+      "protocol": "openai_chat",
+      "capability": "text",
+      "status": "unverified",
+      "reason": "credential_or_model_missing",
+      "actual_upstream": "unknown"
+    },
+    {
+      "provider": "openrouter",
+      "model": "unconfigured",
+      "protocol": "openai_chat",
+      "capability": "stream",
+      "status": "unverified",
+      "reason": "credential_or_model_missing",
+      "actual_upstream": "unknown"
+    },
+    {
+      "provider": "openrouter",
+      "model": "unconfigured",
+      "protocol": "openai_chat",
+      "capability": "tools",
+      "status": "unverified",
+      "reason": "credential_or_model_missing",
+      "actual_upstream": "unknown"
+    },
+    {
+      "provider": "deepseek",
+      "model": "unconfigured",
+      "protocol": "openai_chat",
+      "capability": "text",
+      "status": "unverified",
+      "reason": "credential_or_model_missing",
+      "actual_upstream": "unknown"
+    },
+    {
+      "provider": "deepseek",
+      "model": "unconfigured",
+      "protocol": "openai_chat",
+      "capability": "stream",
+      "status": "unverified",
+      "reason": "credential_or_model_missing",
+      "actual_upstream": "unknown"
+    },
+    {
+      "provider": "deepseek",
+      "model": "unconfigured",
+      "protocol": "openai_chat",
+      "capability": "tools",
+      "status": "unverified",
+      "reason": "credential_or_model_missing",
+      "actual_upstream": "unknown"
+    },
+    {
+      "provider": "deepseek",
+      "model": "unconfigured",
+      "protocol": "openai_chat",
+      "capability": "structured",
+      "status": "unverified",
+      "reason": "credential_or_model_missing",
+      "actual_upstream": "unknown"
+    },
+    {
+      "provider": "deepseek",
+      "model": "unconfigured",
+      "protocol": "openai_chat",
+      "capability": "thinking",
+      "status": "unverified",
+      "reason": "credential_or_model_missing",
+      "actual_upstream": "unknown"
+    },
+    {
+      "provider": "zhipu",
+      "model": "unconfigured",
+      "protocol": "openai_chat",
+      "capability": "text",
+      "status": "unverified",
+      "reason": "credential_or_model_missing",
+      "actual_upstream": "unknown"
+    },
+    {
+      "provider": "zhipu",
+      "model": "unconfigured",
+      "protocol": "openai_chat",
+      "capability": "stream",
+      "status": "unverified",
+      "reason": "credential_or_model_missing",
+      "actual_upstream": "unknown"
+    },
+    {
+      "provider": "zhipu",
+      "model": "unconfigured",
+      "protocol": "openai_chat",
+      "capability": "tools",
+      "status": "unverified",
+      "reason": "credential_or_model_missing",
+      "actual_upstream": "unknown"
+    },
+    {
+      "provider": "zhipu",
+      "model": "unconfigured",
+      "protocol": "openai_chat",
+      "capability": "structured",
+      "status": "unverified",
+      "reason": "credential_or_model_missing",
+      "actual_upstream": "unknown"
+    },
+    {
+      "provider": "zhipu",
+      "model": "unconfigured",
+      "protocol": "openai_chat",
+      "capability": "thinking",
+      "status": "unverified",
+      "reason": "credential_or_model_missing",
+      "actual_upstream": "unknown"
+    }
+  ],
+  "summary": {
+    "passed": 0,
+    "failed": 0,
+    "unverified": 13
+  }
+}

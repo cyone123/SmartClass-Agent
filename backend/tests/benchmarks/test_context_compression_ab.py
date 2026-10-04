@@ -114,7 +114,7 @@ def test_aggregate_overall_latency_does_not_double_count_nested_snapshots() -> N
         controls=controls,
         treatments=treatments,
         settings=settings,
-        model_name="fake",
+        model={"provider": "fake", "model": "fake"},
         started_at=datetime.now(UTC),
         duration_seconds=1,
     )

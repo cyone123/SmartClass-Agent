@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from typing import Literal
+from typing import Any, Literal
 from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -33,7 +33,23 @@ class Capabilities(Schema):
     context_window: int | None = Field(default=None, gt=0)
     max_output: int | None = Field(default=None, gt=0)
     source: Literal["declared", "legacy-declared", "preset"] = "declared"
+    verification: Literal["unknown", "declared", "verified"] = "unknown"
     rules_version: Literal["1"] = "1"
+
+
+class ProviderRouting(Schema):
+    """OpenRouter routing policy; never inferred from a model slug."""
+
+    order: tuple[str, ...] = ()
+    only: tuple[str, ...] = ()
+    ignore: tuple[str, ...] = ()
+    allow_fallbacks: bool = True
+    require_parameters: bool = True
+    data_collection: Literal["allow", "deny"] | None = None
+    sort: Literal["price", "throughput", "latency"] | None = None
+
+    def request_value(self) -> dict[str, Any]:
+        return {key: value for key, value in self.model_dump(mode="json").items() if value not in (None, [], ())}
 
 
 class Parameters(Schema):
@@ -42,11 +58,13 @@ class Parameters(Schema):
     timeout: float | None = Field(default=None, gt=0)
     thinking: Literal["default", "off", "on", "adaptive"] = "default"
     thinking_budget: int | None = Field(default=None, ge=0)
+    reasoning_effort: Literal["minimal", "low", "medium", "high", "xhigh", "max", "ultra"] | None = None
+    provider_routing: ProviderRouting | None = None
     structured_method: Literal["tool_calling", "json_schema"] = "tool_calling"
 
 
 class Connection(Schema):
-    preset: Literal["openai", "custom", "legacy", "anthropic", "gemini"]
+    preset: Literal["openai", "custom", "legacy", "anthropic", "gemini", "openrouter", "deepseek", "zhipu"]
     protocol: Protocol = "openai_chat"
     endpoint: str | None = None
     credential: str
@@ -76,12 +94,13 @@ class Connection(Schema):
 
 
 class ProviderPreset(Schema):
-    id: Literal["openai", "custom", "legacy", "anthropic", "gemini"]
+    id: Literal["openai", "custom", "legacy", "anthropic", "gemini", "openrouter", "deepseek", "zhipu"]
     protocols: tuple[Protocol, ...]
     default_endpoint: str | None = None
     credential_fields: tuple[Literal["api_key"], ...] = ("api_key",)
     credential_source: Literal["env-reference"] = "env-reference"
     parameter_defaults: Parameters = Field(default_factory=Parameters)
+    capabilities: Capabilities = Field(default_factory=lambda: Capabilities(source="preset"))
     capability_rules_version: Literal["1"] = "1"
 
     def parameter_schema(self) -> dict:
@@ -135,7 +154,8 @@ class ResolvedModelConfigSnapshot(Configuration):
                     "protocol": self.connections[model.connection].protocol,
                     "provider": self.connections[model.connection].preset,
                     "capabilities": model.capabilities.model_dump(),
-                    "verified": False,
+                    "verification": model.capabilities.verification,
+                    "verified": model.capabilities.verification == "verified",
                 }
                 for name, model in self.models.items()
             },
@@ -146,9 +166,16 @@ def fingerprint(config: Configuration) -> str:
     data = config.model_dump(mode="json")
     # Preserve version-1 fingerprints of snapshots persisted before native adapters.
     for model in data["models"].values():
+        capabilities = model["capabilities"]
+        if capabilities.get("verification") == "unknown":
+            capabilities.pop("verification", None)
         params = model["parameters"]
         if params.get("thinking_budget") is None:
             params.pop("thinking_budget", None)
+        if params.get("reasoning_effort") is None:
+            params.pop("reasoning_effort", None)
+        if params.get("provider_routing") is None:
+            params.pop("provider_routing", None)
         if params.get("structured_method") == "tool_calling":
             params.pop("structured_method", None)
     payload = json.dumps(data, sort_keys=True, separators=(",", ":"))
@@ -161,3 +188,19 @@ def restore_snapshot(data: dict) -> ResolvedModelConfigSnapshot:
     if fingerprint(config) != snapshot.fingerprint:
         raise ConfigError("snapshot fingerprint mismatch")
     return snapshot
+
+
+def ensure_snapshot_protocols(
+    snapshot: ResolvedModelConfigSnapshot,
+    supported_protocols: set[Protocol] | frozenset[Protocol],
+) -> None:
+    """Fail a deployment/rollback preflight when a fixed snapshot needs a newer runtime."""
+    unsupported = sorted(
+        {
+            snapshot.connections[profile.connection].protocol
+            for profile in snapshot.models.values()
+            if snapshot.connections[profile.connection].protocol not in supported_protocols
+        }
+    )
+    if unsupported:
+        raise ConfigError("snapshot requires unsupported protocol: " + ", ".join(unsupported))

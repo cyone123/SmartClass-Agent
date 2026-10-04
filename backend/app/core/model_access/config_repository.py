@@ -18,6 +18,7 @@ from .schemas import (
     ResolvedModelConfigSnapshot,
     RoleBinding,
     fingerprint,
+    restore_snapshot,
 )
 
 PREFIXES = {
@@ -40,6 +41,16 @@ CONFIG_ROOT = Path(__file__).resolve().parents[4]
 
 class ConfigRepository(Protocol):
     def load(self) -> ResolvedModelConfigSnapshot: ...
+
+
+class InMemoryConfigRepository:
+    """Replaceable repository used by tests and future storage adapters."""
+
+    def __init__(self, snapshot: ResolvedModelConfigSnapshot):
+        self._snapshot = restore_snapshot(snapshot.model_dump(mode="json"))
+
+    def load(self) -> ResolvedModelConfigSnapshot:
+        return restore_snapshot(self._snapshot.model_dump(mode="json"))
 
 
 def _timeout(env: Mapping[str, str], name: str, default: str = "0") -> float | None:
